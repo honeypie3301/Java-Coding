@@ -8889,6 +8889,7 @@ public static float lerpAngle(float pct, float start, float end) {
 
 	public static boolean hasNBTKey(CompoundTag tag, String key) {
 		return tag.contains(key);
+	}
 
 	// =========================================================================
 	// ROT BRAIN COMPATIBILITY BRIDGES & TYPE ALIASES FOR EXTERNAL PROCEDURES

@@ -415,7 +415,7 @@ public static class CombatContext {
 	}
 
 	public static final List<AbilityInfo> ABILITY_REGISTRY = new ArrayList<>();
-public static {
+	static {
 		ABILITY_REGISTRY.add(new AbilityInfo("sonic_boom", K_USB2, K_SWSC, 24.0, SONIC_BOOM_DMG, "ranged", "burst", "anti-air", "control")
 			.mobility(24.0, 12.0, 24.0, 0.0, 0.0, "PROJECTILE", 3.0, true, true, true)
 			.targeting(2.0, 2.0, 0.5, true, true, true, true, true, true)
