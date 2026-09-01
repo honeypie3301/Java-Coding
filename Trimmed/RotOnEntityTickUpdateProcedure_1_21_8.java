@@ -8596,49 +8596,6 @@ public static float lerpAngle(float pct, float start, float end) {
 	}
 
 	
-public static void recordRotLandingImpact(Entity rot, double fallDistance) {
-			if (rot == null || !(rot.level() instanceof net.minecraft.world.level.Level level)) return;
-			if (fallDistance >= 4.0) {
-				Vec3 pos = rot.position();
-				AABB shockBox = rot.getBoundingBox().inflate(6.0);
-				List<LivingEntity> enemies = level.getEntitiesOfClass(LivingEntity.class, shockBox, e -> e != rot && e.isAlive() && (e instanceof Player || e instanceof Mob));
-				for (LivingEntity enemy : enemies) {
-					Vec3 push = enemy.position().subtract(pos).normalize().scale(0.4).add(0, 0.25, 0);
-					enemy.setDeltaMovement(enemy.getDeltaMovement().add(push));
-					enemy.hasImpulse = true;
-					enemy.addEffect(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.SLOWNESS, 40, 0));
-				}
-				if (level instanceof ServerLevel serverLevel && !enemies.isEmpty()) {
-					serverLevel.sendParticles(ParticleTypes.EXPLOSION, pos.x, pos.y + 0.2, pos.z, 12, 1.5, 0.2, 1.5, 0.1);
-				}
-			}
-		}
-
-		public static void onPlayerLoggedOut(UUID playerUuid) {
-			OBSERVATIONS.remove(playerUuid);
-			PENDING_PREDICTIONS.remove(playerUuid);
-			PlayerBehaviorTracker.remove(playerUuid);
-		}
-
-		public static void pruneStaleProfiles(long currentTick) {
-			PROFILES.entrySet().removeIf(entry -> {
-				String key = entry.getKey();
-				if (key != null && key.startsWith("player:")) {
-					CombatProfile profile = entry.getValue();
-					return profile != null && profile.lastAttackTick > 0 && (currentTick - profile.lastAttackTick > 72000);
-				}
-				return false;
-			});
-		}
-
-		public static void clearPrediction(Entity rot) {
-			setRotPersistentString(rot, K_SPTL, "NONE");
-			setRotPersistentDouble(rot, K_SPTS, 0.0);
-			setRotPersistentBoolean(rot, K_SPAI, false);
-			setRotPersistentBoolean(rot, K_SWD, false);
-		}
-	}
-
 	public static boolean isRotChannelingAbility(Entity entity) {
 		if (entity == null || entity.getPersistentData() == null) return false;
 		return getRotPersistentDouble(entity, K_SSCT, 0.0) > 0
