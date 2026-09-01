@@ -3701,7 +3701,6 @@ public static {
 				PENDING_PREDICTIONS.remove(targetUuid);
 			}
 		}
-
-		
+	}
 }
 // 1.21.1

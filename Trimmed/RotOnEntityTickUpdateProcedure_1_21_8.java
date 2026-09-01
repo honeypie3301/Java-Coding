@@ -68,10 +68,9 @@ import net.minecraft.world.level.saveddata.SavedDataType;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import com.mojang.serialization.Codec;
-
-@EventBusSubscriber
 import static net.mcreator.thebackwoods.procedures.RotBrainProcedure.*;
 
+@EventBusSubscriber
 public class RotOnEntityTickUpdateProcedure {
 	public static boolean dealTrueDamageToBosses(net.minecraft.world.entity.Entity target, net.minecraft.world.damagesource.DamageSource ds, float amount) {
 		if (target == null || !target.isAlive()) return false;
@@ -8940,7 +8939,6 @@ public static void recordRotLandingImpact(Entity rot, double fallDistance) {
 
 	public static boolean hasNBTKey(CompoundTag tag, String key) {
 		return tag.contains(key);
-	}
 
 	// =========================================================================
 	// ROT BRAIN COMPATIBILITY BRIDGES & TYPE ALIASES FOR EXTERNAL PROCEDURES
