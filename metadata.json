@@ -1,0 +1,6 @@
+{
+  "name": "Backwoods Wiki & StiltWalker AI Companion",
+  "description": "Interactive StiltWalker AI simulator, NeoForge 1.21.1 and 1.21.8 procedure inspector, and Backwoods mod wiki.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

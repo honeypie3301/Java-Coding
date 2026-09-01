@@ -1,0 +1,328 @@
+package net.mcreator.thebackwoods.procedures;
+
+import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
+import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.bus.api.Event;
+// 1.21.1
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.LevelAccessor;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.damagesource.DamageTypes;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.network.chat.Component;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.core.BlockPos;
+import net.minecraft.advancements.AdvancementProgress;
+import net.minecraft.advancements.AdvancementHolder;
+
+import net.mcreator.thebackwoods.entity.RotEntity;
+
+import javax.annotation.Nullable;
+
+import java.util.Comparator;
+
+@EventBusSubscriber
+public class RotEntityIsHurtProcedure {
+	// Toggleable setting to enable or disable Rot combat dialogue
+	public static final boolean ENABLE_ROT_DIALOGUES = true;
+
+	// Dialogue variant pools per HP stage
+	private static final String[] DIALOGUES_STAGE_1 = {
+		"I have felt deeper cuts than this.",
+		"Your strikes only peel the bark.",
+		"Flesh tires. The rot remains."
+	};
+
+	private static final String[] DIALOGUES_STAGE_2 = {
+		"I thin yet the hunger widens.",
+		"Every wound leaves more room to take.",
+		"You cannot carve away what is already hollow."
+	};
+
+	private static final String[] DIALOGUES_STAGE_3 = {
+		"Pruning...",
+		"The roots do not bleed.",
+		"You will wither long before I fall."
+	};
+
+	private static final String[] DIALOGUES_DEATH = {
+		"This vessel is spent... but the wood remembers.",
+		"You have broken nothing.",
+		"Dissolving... only to take root elsewhere."
+	};
+
+	@SubscribeEvent
+	public static void onEntityAttacked(LivingDamageEvent.Pre event) {
+		if (event.getEntity() != null) {
+			execute(event, event.getEntity().level(), event.getEntity().getX(), event.getEntity().getY(), event.getEntity().getZ(), event.getEntity());
+		}
+	}
+
+	public static void execute(LevelAccessor world, double x, double y, double z, Entity entity) {
+		execute(null, world, x, y, z, entity);
+	}
+
+	private static void execute(@Nullable Event event, LevelAccessor world, double x, double y, double z, Entity entity) {
+		if (entity == null)
+			return;
+		Entity attacker = null;
+		Entity foundPlayer = null;
+		double loop = 0;
+		double particleAmount = 0;
+		double masterRadius = 0;
+		if (event instanceof LivingDamageEvent.Pre dmgEv) {
+			if (dmgEv.getSource().getDirectEntity() instanceof net.minecraft.world.entity.projectile.WitherSkull skull) {
+				if (skull.getOwner() instanceof RotEntity rotOwner) {
+					if (entity instanceof LivingEntity victim && (victim.isBlocking() || dmgEv.getNewDamage() <= 0.0F)) {
+						double fails = rotOwner.getPersistentData().getDouble("wither_skull_fail_count");
+						rotOwner.getPersistentData().putDouble("wither_skull_fail_count", fails + 1.0);
+					}
+				}
+			}
+		}
+		if (entity instanceof RotEntity) {
+			if (event instanceof LivingDamageEvent.Pre preEvent) {
+				// Permanent Immunity to Alex's Caves Radiation / Irradiated
+				DamageSource srcRad = preEvent.getSource();
+				String srcRadMsg = srcRad.getMsgId();
+				String srcRadType = "";
+				try {
+					if (srcRad.typeHolder() != null && srcRad.typeHolder().unwrapKey().isPresent()) {
+						srcRadType = srcRad.typeHolder().unwrapKey().get().location().toString();
+					}
+				} catch (Exception ignored) {}
+				if (srcRadMsg.contains("irradiated") || srcRadMsg.contains("radiation") || srcRadType.contains("irradiated") || srcRadType.contains("radiation")) {
+					preEvent.setNewDamage(0.0F);
+					if (entity instanceof LivingEntity living) {
+						for (net.minecraft.world.effect.MobEffectInstance eff : new java.util.ArrayList<>(living.getActiveEffects())) {
+							String effId = BuiltInRegistries.MOB_EFFECT.getKey(eff.getEffect().value()).toString();
+							if (effId.contains("irradiated") || effId.contains("radiation")) {
+								living.removeEffect(eff.getEffect());
+							}
+						}
+					}
+					return;
+				}
+				// Permanent Fire Immunity once Solar Beam is learned
+				if (entity.getPersistentData().getBoolean("unlocked_solar_beam")) {
+					DamageSource src = preEvent.getSource();
+					if (src.is(DamageTypes.IN_FIRE) || src.is(DamageTypes.ON_FIRE) || src.is(DamageTypes.LAVA)
+						|| src.is(DamageTypes.HOT_FLOOR) || src.is(DamageTypes.FIREBALL) || src.is(DamageTypes.UNATTRIBUTED_FIREBALL)
+						|| src.is(DamageTypes.CAMPFIRE)) {
+						preEvent.setNewDamage(0.0F);
+						return;
+					}
+				}
+				// Permanent Freeze Immunity once Cryo Beam is learned
+				if (entity.getPersistentData().getBoolean("unlocked_cryo_beam")) {
+					DamageSource src = preEvent.getSource();
+					if (src.is(DamageTypes.FREEZE)) {
+						preEvent.setNewDamage(0.0F);
+						return;
+					}
+				}
+				// Phase Shift Intangibility & Phasing Mastery Leakage
+				if (entity.getPersistentData().getBoolean("rot_phase_shifting")) {
+					double mastery = entity.getPersistentData().getDouble("rot_phase_mastery");
+					double leakChance = mastery < 0.35 ? 0.35 : (mastery < 0.75 ? 0.10 : 0.0);
+					if (Math.random() < leakChance) {
+						// Imperfect Phase Leakage: takes partial damage when phase fails
+						float partialRatio = mastery < 0.35 ? 0.40F : 0.15F;
+						preEvent.setNewDamage(preEvent.getNewDamage() * partialRatio);
+						if (world instanceof ServerLevel _level) {
+							_level.sendParticles(ParticleTypes.WITCH, entity.getX(), entity.getY() + 1.0, entity.getZ(), 8, 0.2, 0.4, 0.2, 0.05);
+						}
+					} else {
+						// Flawless Phase Intangibility: 100% damage immunity
+						preEvent.setNewDamage(0.0F);
+						if (world instanceof ServerLevel _level) {
+							_level.sendParticles(ParticleTypes.PORTAL, entity.getX(), entity.getY() + 1.0, entity.getZ(), 5, 0.2, 0.3, 0.2, 0.02);
+						}
+						return;
+					}
+				}
+			}
+
+			// Controlled Adaptation: Absorb 90% of incoming damage and build up fast Regeneration III & Resistance
+			double activeAdaptTicks = entity.getPersistentData().getDouble("controlled_adaptation_ticks");
+			if (activeAdaptTicks > 0) {
+				if (event instanceof LivingDamageEvent.Pre preEv) {
+					float originalDmg = preEv.getNewDamage();
+					float reducedDmg = originalDmg * 0.10F; // Only take 10% damage
+					preEv.setNewDamage(reducedDmg);
+					if (entity instanceof LivingEntity rotLiv) {
+						int currentRegenAmplifier = 0;
+						if (rotLiv.hasEffect(net.minecraft.world.effect.MobEffects.REGENERATION)) {
+							currentRegenAmplifier = rotLiv.getEffect(net.minecraft.world.effect.MobEffects.REGENERATION).getAmplifier() + 1;
+						}
+						int newAmp = Math.min(3, currentRegenAmplifier);
+						rotLiv.addEffect(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.REGENERATION, 160, newAmp));
+						rotLiv.addEffect(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.DAMAGE_RESISTANCE, 160, 0));
+					}
+
+					// Anti-Nuke & Exploit Threshold: If hit by an overpowered weapon / hot-swap (raw dmg >= 12.0), break adaptation immediately!
+					if (originalDmg >= 12.0F) {
+						entity.getPersistentData().putDouble("controlled_adaptation_ticks", 0.0);
+						entity.getPersistentData().putDouble("controlled_adaptation_cooldown", 500.0); // 25s penalty
+						if (world instanceof ServerLevel _sL) {
+							_sL.sendParticles(ParticleTypes.SMOKE, entity.getX(), entity.getY() + 1.0, entity.getZ(), 20, 0.3, 0.4, 0.3, 0.1);
+						}
+					}
+				}
+			}
+
+			if (entity.getPersistentData().getBoolean("is_blocking")) {
+				if (event instanceof LivingDamageEvent.Pre preEvent) {
+					preEvent.setNewDamage(preEvent.getNewDamage() * 0.01F);
+				}
+			}
+
+			// Dynamic Ballistic Trait & High-RPM Burst Tracking
+			long currentHitTick = (world instanceof Level _lvl) ? _lvl.getGameTime() : entity.tickCount;
+			double lastHitTick = entity.getPersistentData().getDouble("sentinel_last_hit_tick");
+			double sustainedHits = entity.getPersistentData().getDouble("sentinel_sustained_bullet_hits");
+
+			if ((currentHitTick - (long) lastHitTick) <= 4) {
+				// Rapid consecutive hits within 4 ticks (automatic gunfire / minigun stream)
+				sustainedHits = Math.min(15.0, sustainedHits + 1.0);
+				entity.getPersistentData().putDouble("sentinel_last_high_rpm_tick", currentHitTick);
+			} else if ((currentHitTick - (long) lastHitTick) > 20) {
+				// Fire paused or reloaded
+				sustainedHits = Math.max(0.0, sustainedHits - 2.0);
+			}
+			entity.getPersistentData().putDouble("sentinel_last_hit_tick", currentHitTick);
+			entity.getPersistentData().putDouble("sentinel_sustained_bullet_hits", sustainedHits);
+
+			// Ballistic Bark Hardening: Dampens single continuous spray bursts dynamically
+			if (sustainedHits >= 3.0 && event instanceof LivingDamageEvent.Pre preEv) {
+				double dampeningRatio = Math.max(0.12, 1.0 - (sustainedHits * 0.08));
+				preEv.setNewDamage((float) (preEv.getNewDamage() * dampeningRatio));
+				if (world instanceof ServerLevel _level) {
+					_level.sendParticles(ParticleTypes.CRIT, entity.getX(), entity.getY() + 1.0, entity.getZ(), 3, 0.2, 0.3, 0.2, 0.05);
+				}
+			}
+			attacker = (entity instanceof LivingEntity _entity) ? _entity.getLastHurtByMob() : null;
+			foundPlayer = findEntityInWorldRange(world, Player.class, x, y, z, 64);
+			Entity targetRecipient = (attacker instanceof Player) ? attacker : foundPlayer;
+
+			if (attacker != null) {
+				RotOnEntityTickUpdateProcedure.UniversalCombatPredictionEngine.recordActualAttack(entity, attacker, "MELEE");
+				RotOnEntityTickUpdateProcedure.UniversalCombatPredictionEngine.recordRotDamage(entity, attacker);
+				if (hasEntityInInventory(attacker, new ItemStack(Items.TOTEM_OF_UNDYING))) {
+					if (ENABLE_ROT_DIALOGUES && entity.getPersistentData().getDouble("rot_totem_dialogue_fired") == 0.0) {
+						entity.getPersistentData().putDouble("rot_totem_dialogue_fired", 1.0);
+						if (attacker instanceof Player _player && !_player.level().isClientSide())
+							_player.displayClientMessage(Component.literal("I see the false life you clutch."), true);
+					}
+				}
+			}
+			boolean isDeathActive = false;
+			if (entity instanceof LivingEntity _livEnt) {
+				boolean isAlreadyDead = false;
+				try {
+					isAlreadyDead = entity.getEntityData().get(net.mcreator.thebackwoods.entity.RotEntity.DATA_isDeath);
+				} catch (Exception e) {}
+				isDeathActive = isAlreadyDead || entity.getPersistentData().getBoolean("rot_death_sequence_active");
+
+				float currentHp = _livEnt.getHealth();
+				float incomingDmg = 0.0F;
+				if (event instanceof LivingDamageEvent.Pre preEv) {
+					incomingDmg = preEv.getNewDamage();
+				} else if (event instanceof LivingIncomingDamageEvent incEv) {
+					incomingDmg = incEv.getAmount();
+				}
+
+				if (isDeathActive || currentHp <= 20.0F || (currentHp - incomingDmg) <= 0.0F || _livEnt.isDeadOrDying()) {
+					if (event instanceof LivingDamageEvent.Pre preEv) {
+						preEv.setNewDamage(0.0F);
+					} else if (event instanceof LivingIncomingDamageEvent incEv) {
+						incEv.setAmount(0.0F);
+					}
+					_livEnt.setHealth(1.0F);
+					_livEnt.deathTime = 0;
+					_livEnt.setInvulnerable(true);
+
+					if (!isAlreadyDead && !entity.getPersistentData().getBoolean("rot_death_sequence_active")) {
+						try {
+							entity.getEntityData().set(net.mcreator.thebackwoods.entity.RotEntity.DATA_isDeath, true);
+						} catch (Exception e) {}
+						entity.getPersistentData().putBoolean("rot_death_sequence_active", true);
+						entity.getPersistentData().putDouble("rot_death_ticks", 240.0); // 12 seconds (240 ticks)
+
+						// Death sequence dialogue (fires once)
+						triggerStageDialogue(entity, targetRecipient, DIALOGUES_DEATH, "rot_dialogue_death_fired");
+
+						// Award "rot_boss" advancement to the defeating player
+						ServerPlayer targetPlayer = null;
+						if (attacker instanceof ServerPlayer sp) {
+							targetPlayer = sp;
+						} else if (foundPlayer instanceof ServerPlayer sp) {
+							targetPlayer = sp;
+						}
+
+						if (targetPlayer != null && targetPlayer.level() instanceof ServerLevel _level) {
+							AdvancementHolder _adv = _level.getServer().getAdvancements().get(ResourceLocation.parse("the_backwoods:rot_boss"));
+							if (_adv != null) {
+								AdvancementProgress _ap = targetPlayer.getAdvancements().getOrStartProgress(_adv);
+								if (!_ap.isDone()) {
+									for (String criteria : _ap.getRemainingCriteria())
+										targetPlayer.getAdvancements().award(_adv, criteria);
+								}
+							}
+						}
+					}
+					return;
+				}
+			}
+
+			// Stage-based HP dialogues (each fires only once per stage)
+			float hp = (entity instanceof LivingEntity _livEnt) ? _livEnt.getHealth() : -1;
+			if (hp > 0 && !isDeathActive) {
+				if (hp <= 50) {
+					triggerStageDialogue(entity, targetRecipient, DIALOGUES_STAGE_3, "msg3_fired");
+				} else if (hp <= 100) {
+					triggerStageDialogue(entity, targetRecipient, DIALOGUES_STAGE_2, "msg2_fired");
+				} else if (hp <= 250) {
+					triggerStageDialogue(entity, targetRecipient, DIALOGUES_STAGE_1, "msg1_fired");
+				}
+			}
+		}
+	}
+
+	private static void triggerStageDialogue(Entity rotEntity, Entity target, String[] dialoguePool, String persistentTag) {
+		if (!ENABLE_ROT_DIALOGUES || dialoguePool == null || dialoguePool.length == 0 || target == null)
+			return;
+
+		if (rotEntity.getPersistentData().getDouble(persistentTag) == 0.0) {
+			rotEntity.getPersistentData().putDouble(persistentTag, 1.0);
+			if (target instanceof Player _player && !_player.level().isClientSide()) {
+				int index = (int) (Math.random() * dialoguePool.length);
+				_player.displayClientMessage(Component.literal(dialoguePool[index]), true);
+			}
+		}
+	}
+
+	private static Entity findEntityInWorldRange(LevelAccessor world, Class<? extends Entity> clazz, double x, double y, double z, double range) {
+		return (Entity) world.getEntitiesOfClass(clazz, AABB.ofSize(new Vec3(x, y, z), range, range, range), e -> true).stream().sorted(Comparator.comparingDouble(e -> e.distanceToSqr(x, y, z))).findFirst().orElse(null);
+	}
+
+	private static boolean hasEntityInInventory(Entity entity, ItemStack itemstack) {
+		if (entity instanceof Player player)
+			return player.getInventory().contains(stack -> !stack.isEmpty() && ItemStack.isSameItem(stack, itemstack));
+		return false;
+	} // 1.21.1
+}

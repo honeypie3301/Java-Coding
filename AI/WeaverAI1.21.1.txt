@@ -1,0 +1,2834 @@
+package net.mcreator.thebackwoods.procedures;
+
+import net.neoforged.neoforge.event.ServerChatEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.core.registries.BuiltInRegistries;
+
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.level.LevelAccessor;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.core.Holder;
+import net.minecraft.network.syncher.EntityDataAccessor;
+import net.mcreator.thebackwoods.entity.WoodweaverEntity;
+
+import java.util.List;
+
+@EventBusSubscriber
+public class WoodweaverOnEntityTickUpdateProcedure {
+	public static boolean WEAVER_DEBUG = false;
+	public static boolean HYPNO_EFFECTS_ENABLED = false; // Hypnosis special/visual effects disabled by default
+	public static double MAX_CLAW_BLOCK_HARDNESS = 10.0; // Maximum block hardness breakable by claw attacks
+
+	// ==========================================
+	// --- WEAVER CONFIGURABLE AI SETTINGS ------
+	// ==========================================
+	
+	// Wither Storm-style Tractor Beam field & speed constants
+	public static double BEAM_SIZE_MULTIPLIER = 3.5; // Expanding cone width multiplier
+	public static double TRACTOR_BEAM_MAX_RANGE = 24.0; // Maximum effective range of hypnosis tractor beam (blocks)
+	public static double DIRECT_STARE_MAX_RANGE = 24.0; // Direct stare detection & pull range (24 blocks)
+	public static double TRACTOR_BEAM_BASE_SPEED = 0.50; // Base tractor beam velocity pull speed
+	public static double HYPNO_HOLD_DISTANCE = 6.0; // Minimum hypnosis holding distance between target center and Weaver beam origin
+	public static double HYPNO_HOLD_HEIGHT = 4.5; // Desired target levitation height above Weaver base feet level
+
+	// Configurable distance under which the target's camera is locked onto the Weaver during hypnosis
+	private static final double HYPNO_SIGHT_LOCK_DISTANCE = 8.5;
+
+	// Transition timing from start hypno animation to looping orb animation (ticks)
+	public static int HYPNO_PULL_START_TICK = 20; // 1.0s stationary telegraph window before tractor beam pull begins
+	private static final int HYPNO_ORB_TRANSITION_TICKS = 60; // 3.0s (60 ticks)
+	
+	// Hypnosis total holding/active duration (ticks) of telekinetic suspension
+	private static final int HYPNO_HOLD_DURATION = 160;
+
+	// Hypnosis closing reversed animation duration variants (ticks)
+	public static int HYPNO_CLOSING_DURATION = 30;
+
+	// Post-hypnosis attack lockout duration (ticks) before Weaver can melee attack target again
+	public static int HYPNO_RECOVERY_TICKS = 15;
+
+	// Configurable amplified trajectory height boost for Woodweaver jumps
+	public static double LEAP_HEIGHT_BOOST = 0.65;
+	
+	// Cooldown ticks between leaping attempts (10 seconds default)
+	private static final int LEAP_COOLDOWN_DEFAULT = 200;
+	
+	// Minimum distance to target to trigger leaping
+	private static final double LEAP_MIN_DISTANCE = 8.0;
+	
+	// Maximum distance to target to trigger leaping
+	private static final double LEAP_MAX_DISTANCE = 24.0;
+	
+	// Trajectory speed factor/multiplier of leaping
+	private static final double LEAP_SPEED_MULTIPLIER = 1.32;
+	
+	// Damage dealt by landing shockwave
+	private static final double LANDING_DAMAGE = 16.0;
+	
+	// Block destruction/shockwave radius on landing
+	private static final double LANDING_RADIUS = 3.0;
+	
+	// Toggle to enable/disable block destruction on shockwave landing
+	private static final boolean IS_SHOCKWAVE_DESTRUCTION_ENABLED = false;
+	
+	// Swipe & reach range of melee claw attacks (synced to 5.0 block reach animations)
+	private static final double MELEE_ATTACK_RANGE = 5.0;
+	
+	// Delay ticks before physically jumping while the leaping animation is playing
+	public static int LEAP_PREPARATION_TICKS = 20;
+
+	// Duration of the landing animation freeze / recovery state (ticks).
+	public static int LANDING_ANIM_DURATION = 25;
+
+	// Total duration of the melee claw attack animations (ticks).
+	public static int MELEE_ATTACK_DURATION = 40;
+
+	// Default peak tick offset for damage dealing
+	public static int ATTACK_DAMAGE_TICK = 15;
+	
+	// Configurable claw hit offsets for 5-block reach melee animations
+	public static double CLAW_FRONT_OFFSET = 4.2;
+	public static double CLAW_SIDE_OFFSET = 1.2;
+	public static double CLAW_HEIGHT_OFFSET = 1.2;
+	public static double CLAW_HIT_RADIUS = 2.8;
+
+	// Toggle to enable/disable block destruction on claw swipes
+	private static final boolean IS_CLAW_DESTRUCTION_ENABLED = true;
+
+	// ==========================================
+
+	public static void execute(LevelAccessor world, double x, double y, double z, Entity entity) {
+		if (entity == null)
+			return;
+
+		if (world.isClientSide()) {
+			return;
+		}
+
+		if (!(entity instanceof Mob mob))
+			return;
+
+		CompoundTag mData = mob.getPersistentData();
+
+		// POST-FATIGUE STATE (Triggered after weaponized hypno ends):
+		// Freeze movement, prevent rotation changes, and lockout all following abilities
+		int postFatigueTicks = persistentInt(mData, "weapon_post_fatigue_ticks", 0);
+		if (postFatigueTicks > 0) {
+			mData.putInt("weapon_post_fatigue_ticks", postFatigueTicks - 1);
+			stopMobMotion(mob);
+			mob.getNavigation().stop();
+			mob.setTarget(null);
+
+			double startX = persistentDouble(mData, "hypno_start_x", mob.getX());
+			double startY = persistentDouble(mData, "hypno_start_y", mob.getY());
+			double startZ = persistentDouble(mData, "hypno_start_z", mob.getZ());
+			if (mob.distanceToSqr(startX, mob.getY(), startZ) > 0.001) {
+				mob.teleportTo(startX, mob.getY(), startZ);
+			}
+
+			if (mData.contains("post_fatigue_yaw")) {
+				float lockedYaw = persistentFloat(mData, "post_fatigue_yaw", mob.getYRot());
+				mob.setYRot(lockedYaw);
+				mob.yRotO = lockedYaw;
+				mob.setYBodyRot(lockedYaw);
+				mob.setYHeadRot(lockedYaw);
+				mob.yHeadRotO = lockedYaw;
+				mob.yBodyRotO = lockedYaw;
+				double rad = Math.toRadians(lockedYaw);
+				double lookX = mob.getX() - Math.sin(rad) * 10.0;
+				double lookZ = mob.getZ() + Math.cos(rad) * 10.0;
+				mob.getLookControl().setLookAt(lookX, mob.getEyeY(), lookZ, 30.0F, 30.0F);
+			}
+			updateStateAndLog(mob, mData, "POST_HYPNO_FATIGUE");
+			syncWeaverEntityData(mob, false, mData);
+			return;
+		} else if (mData.contains("post_fatigue_yaw")) {
+			mData.remove("post_fatigue_yaw");
+			mData.remove("weaver_hypnosis_yaw");
+			mData.remove("hypno_start_x");
+			mData.remove("hypno_start_y");
+			mData.remove("hypno_start_z");
+			int savedTargetId = persistentInt(mData, "weapon_flash_saved_target", 0);
+			if (savedTargetId != 0) {
+				Entity raw = mob.level().getEntity(savedTargetId);
+				if (raw instanceof LivingEntity le && le.isAlive()) {
+					mob.setTarget(le);
+				}
+				mData.remove("weapon_flash_saved_target");
+			}
+		}
+
+		// WEAPONIZED FLASH GUARD (Interception at top of tick to prevent target pursuit or standard AI from running)
+		int activeFlashPhase = persistentInt(mData, "weapon_flash_phase", 0);
+		if (activeFlashPhase > 0) {
+			clearOtherStates(mData, "FLASH");
+			if (mob.getTarget() != null) {
+				mData.putInt("weapon_flash_saved_target", mob.getTarget().getId());
+				mob.setTarget(null);
+			}
+		}
+
+		// INITIALIZATION & STALE STATE CLEANUP ON FIRST TICK / SPAWN
+
+		// Cooldown ticks management
+		int leapCooldown = persistentInt(mData, "leap_cooldown", 0);
+		if (leapCooldown > 0) {
+			mData.putInt("leap_cooldown", leapCooldown - 1);
+		}
+
+		int attackTimer = persistentInt(mData, "attack_timer", 0);
+		if (attackTimer > 0) {
+			mData.putInt("attack_timer", attackTimer - 1);
+		}
+
+		int hypnoCooldown = persistentInt(mData, "hypno_cooldown", 0);
+		if (hypnoCooldown > 0) {
+			mData.putInt("hypno_cooldown", hypnoCooldown - 1);
+		}
+
+		int hypnoAttackLockout = persistentInt(mData, "hypno_attack_lockout", 0);
+		if (hypnoAttackLockout > 0) {
+			mData.putInt("hypno_attack_lockout", hypnoAttackLockout - 1);
+		}
+
+		// Single Authoritative Hypnosis Phase Integer (0=NONE, 1=OPENING, 2=OPEN/ORB, 3=CLOSING)
+		int hypnoPhase = persistentInt(mData, "hypno_phase", 0);
+
+		if (hypnoPhase > 0) {
+			clearOtherStates(mData, "HYPNO");
+			mob.setTarget(null); // Unset target so MeleeAttackGoal stops running during hypnosis
+
+			// Hard lock position, movement and rotation to start position to prevent physics/pathing/rotation drift
+			double startX = persistentDouble(mData, "hypno_start_x", mob.getX());
+			double startY = persistentDouble(mData, "hypno_start_y", mob.getY());
+			double startZ = persistentDouble(mData, "hypno_start_z", mob.getZ());
+
+			stopMobMotion(mob);
+			mob.getNavigation().stop();
+			if (mob.distanceToSqr(startX, mob.getY(), startZ) > 0.001) {
+				mob.teleportTo(startX, mob.getY(), startZ);
+			}
+
+			int targetId = persistentInt(mData, "hypno_target_id", 0);
+			Entity rawTarget = mob.level().getEntity(targetId);
+			Player hypnoTarget = (rawTarget instanceof Player p) ? p : null;
+
+			int hits = persistentInt(mData, "hypno_hits_received", 0);
+
+			// HYPER-AWARE LINE OF SIGHT: Check LOS with ~1.5s (30 ticks) grace period
+			boolean hasDirectLos = false;
+			if (hypnoTarget != null && hypnoTarget.isAlive()) {
+				Vec3 startEye = mob.getEyePosition(1.0F);
+				Vec3 targetEye = hypnoTarget.getEyePosition(1.0F);
+				BlockHitResult hit = world.clip(new net.minecraft.world.level.ClipContext(
+					startEye, targetEye,
+					net.minecraft.world.level.ClipContext.Block.COLLIDER,
+					net.minecraft.world.level.ClipContext.Fluid.NONE,
+					mob
+				));
+				if (hit.getType() != net.minecraft.world.phys.HitResult.Type.BLOCK || mob.hasLineOfSight(hypnoTarget)) {
+					hasDirectLos = true;
+				}
+			}
+
+			int losLostTicks = persistentInt(mData, "hypno_los_lost_ticks", 0);
+			if (!hasDirectLos) {
+				losLostTicks++;
+				mData.putInt("hypno_los_lost_ticks", losLostTicks);
+			} else {
+				mData.putInt("hypno_los_lost_ticks", 0);
+			}
+
+			boolean losGraceExpired = (losLostTicks >= 30); // ~1.5 sec grace period before canceling hypnosis
+
+			boolean targetLostOrDead = (hypnoTarget == null || !hypnoTarget.isAlive() || hypnoTarget.isCreative() || hypnoTarget.isSpectator() || hypnoTarget.distanceTo(mob) > 24.0 || hits >= 3 || losGraceExpired);
+
+			if (hypnoPhase == 1) { // HYPNO_PHASE_OPENING (Ticks 0 - 59)
+				updateStateAndLog(mob, mData, "HYPNO_OPENING");
+				updateAndApplyHypnosisYaw(mob, mData, hypnoTarget, false);
+
+				boolean gazeBroken = false;
+				if (hypnoTarget != null && hypnoTarget.isAlive()) {
+					Vec3 lookVec = hypnoTarget.getLookAngle();
+					Vec3 toMobVec = new Vec3(mob.getX() - hypnoTarget.getX(), (mob.getY() + 1.8) - hypnoTarget.getEyeY(), mob.getZ() - hypnoTarget.getZ()).normalize();
+					double dot = lookVec.dot(toMobVec);
+					if (dot <= 0.70) {
+						gazeBroken = true;
+					}
+				}
+
+				if (targetLostOrDead || gazeBroken) {
+					// ADAPTIVE TARGET SWITCHING: Prioritize recent attacker who hit Weaver or broke hypnosis
+					LivingEntity lastAttacker = mob.getLastHurtByMob();
+					if (lastAttacker != null && lastAttacker.isAlive() && !isWoodboundOrWeaver(lastAttacker)) {
+						mob.setTarget(lastAttacker);
+					}
+
+					setHypnoPhase(mData, 3);
+					updateStateAndLog(mob, mData, "HYPNO_CLOSING");
+					mData.putInt("closing_hypno_ticks", 0);
+					mData.putInt("hypno_closing_duration", 20);
+					mData.putBoolean("hypno_interrupted", true);
+					mData.putInt("hypno_cooldown", 120);
+					mData.putInt("hypno_los_lost_ticks", 0);
+					mob.level().playSound(null, mob.getX(), mob.getY(), mob.getZ(), SoundEvents.BEACON_DEACTIVATE, SoundSource.HOSTILE, 6.0F, 0.50F);
+
+					if (hypnoTarget != null) {
+						hypnoTarget.setDeltaMovement(0, 0, 0);
+						hypnoTarget.hasImpulse = true;
+						if (hypnoTarget instanceof ServerPlayer sp) {
+							sp.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket(sp));
+						}
+					}
+
+					syncWeaverEntityData(mob, false, mData);
+					return;
+				}
+
+				int hypnoTicks = persistentInt(mData, "hypno_ticks", 0) + 1;
+				mData.putInt("hypno_ticks", hypnoTicks);
+
+				if (hypnoTicks == 1) {
+					mob.level().playSound(null, mob.getX(), mob.getY(), mob.getZ(), SoundEvents.BEACON_ACTIVATE, SoundSource.HOSTILE, 7.5F, 0.45F);
+				}
+
+				// TARGET PULL STARTS EARLY with linear force ramp up to tick 60
+				if (hypnoTicks >= HYPNO_PULL_START_TICK) {
+					double pullRamp = Math.min(1.0, (double)(hypnoTicks - HYPNO_PULL_START_TICK + 1) / (HYPNO_ORB_TRANSITION_TICKS - HYPNO_PULL_START_TICK));
+					applyTractorBeamPull(mob, hypnoTarget, pullRamp);
+				}
+
+				// At exact tick 60: Seamless transition to HYPNO_PHASE_OPEN (Orb Loop)
+				if (hypnoTicks >= HYPNO_ORB_TRANSITION_TICKS) {
+					setHypnoPhase(mData, 2); // Phase 2: HYPNO_OPEN (Orb Loop)
+					updateStateAndLog(mob, mData, "HYPNO_OPEN");
+					mData.putInt("hypno_ticks", 0);
+					mob.level().playSound(null, mob.getX(), mob.getY(), mob.getZ(), SoundEvents.BEACON_POWER_SELECT, SoundSource.HOSTILE, 7.5F, 0.50F);
+				}
+
+				syncWeaverEntityData(mob, false, mData);
+				return;
+
+			} else if (hypnoPhase == 2) { // HYPNO_PHASE_OPEN (Orb Loop Hold, Ticks 0 - 160)
+				updateStateAndLog(mob, mData, "HYPNO_OPEN");
+				updateAndApplyHypnosisYaw(mob, mData, hypnoTarget, false);
+
+				if (targetLostOrDead) {
+					setHypnoPhase(mData, 3);
+					updateStateAndLog(mob, mData, "HYPNO_CLOSING");
+					mData.putInt("closing_hypno_ticks", 0);
+					mData.putInt("hypno_closing_duration", 20);
+					mData.putBoolean("hypno_interrupted", true);
+					mData.putInt("hypno_hits_received", 0);
+					mData.putInt("hypno_cooldown", 120);
+					mob.level().playSound(null, mob.getX(), mob.getY(), mob.getZ(), SoundEvents.BEACON_DEACTIVATE, SoundSource.HOSTILE, 6.0F, 0.50F);
+
+					if (hypnoTarget != null) {
+						hypnoTarget.setDeltaMovement(0, 0, 0);
+						hypnoTarget.hasImpulse = true;
+						if (hypnoTarget instanceof ServerPlayer sp) {
+							sp.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket(sp));
+						}
+					}
+
+					syncWeaverEntityData(mob, false, mData);
+					return;
+				}
+
+				int hypnoTicks = persistentInt(mData, "hypno_ticks", 0) + 1;
+				mData.putInt("hypno_ticks", hypnoTicks);
+
+				if (hypnoTicks % 25 == 0) {
+					mob.level().playSound(null, mob.getX(), mob.getY(), mob.getZ(), SoundEvents.BEACON_AMBIENT, SoundSource.HOSTILE, 6.0F, 0.45F);
+				}
+
+				// Smooth Tractor Beam Pull
+				applyTractorBeamPull(mob, hypnoTarget, 1.0);
+
+				if (HYPNO_EFFECTS_ENABLED && hypnoTarget != null) {
+					hypnoTarget.addEffect(new MobEffectInstance(getSlownessEffect(), 40, 2, false, false, true));
+					hypnoTarget.addEffect(new MobEffectInstance(getWitherEffect(), 40, 1, false, false, true));
+				}
+
+				if (hypnoTicks >= HYPNO_HOLD_DURATION) {
+					setHypnoPhase(mData, 3); // Phase 3: HYPNO_CLOSING
+					updateStateAndLog(mob, mData, "HYPNO_CLOSING");
+					mData.putInt("closing_hypno_ticks", 0);
+					mData.putBoolean("hypno_interrupted", false);
+					mob.level().playSound(null, mob.getX(), mob.getY(), mob.getZ(), SoundEvents.BEACON_DEACTIVATE, SoundSource.HOSTILE, 6.0F, 0.50F);
+
+					int chosenClosingDuration = 30;
+					double weaverHpRatio = mob.getHealth() / mob.getMaxHealth();
+					if (hits >= 2 || weaverHpRatio < 0.35) {
+						chosenClosingDuration = 20;
+					} else if (weaverHpRatio > 0.70 && hypnoTarget != null && hypnoTarget.distanceTo(mob) <= 5.0) {
+						chosenClosingDuration = 60;
+					} else {
+						chosenClosingDuration = 30;
+					}
+					mData.putInt("hypno_closing_duration", chosenClosingDuration);
+
+					if (hypnoTarget != null) {
+						hypnoTarget.setDeltaMovement(0, -0.05, 0);
+						if (hypnoTarget instanceof ServerPlayer sp) {
+							sp.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket(sp));
+						}
+					}
+				}
+
+				syncWeaverEntityData(mob, false, mData);
+				return;
+
+			} else if (hypnoPhase == 3) {
+				updateStateAndLog(mob, mData, "HYPNO_CLOSING");
+				updateAndApplyHypnosisYaw(mob, mData, hypnoTarget, false);
+
+				int closingTicks = persistentInt(mData, "closing_hypno_ticks", 0) + 1;
+				mData.putInt("closing_hypno_ticks", closingTicks);
+
+				if (hypnoTarget != null) {
+					hypnoTarget.fallDistance = 0.0F;
+				}
+
+				int duration = persistentInt(mData, "hypno_closing_duration", HYPNO_CLOSING_DURATION);
+				if (closingTicks >= duration) {
+					cancelHypnosisCleanly(mob, mData);
+					return;
+				}
+
+				syncWeaverEntityData(mob, false, mData);
+				return;
+			}
+		}
+
+		// WEAPONIZED FLASH SPECIAL MINING ABILITY ROUTINE
+		int flashPhase = persistentInt(mData, "weapon_flash_phase", 0);
+		if (flashPhase > 0) {
+			int flashTicks = persistentInt(mData, "weapon_flash_ticks", 0) + 1;
+			mData.putInt("weapon_flash_ticks", flashTicks);
+
+			// Hard position anchor and motion cancel across all weaponized hypno phases (Charge, Beam Flash, and Closing)
+			stopMobMotion(mob);
+			mob.getNavigation().stop();
+
+			double startX = persistentDouble(mData, "hypno_start_x", mob.getX());
+			double startY = persistentDouble(mData, "hypno_start_y", mob.getY());
+			double startZ = persistentDouble(mData, "hypno_start_z", mob.getZ());
+			if (mob.distanceToSqr(startX, mob.getY(), startZ) > 0.001) {
+				mob.teleportTo(startX, mob.getY(), startZ);
+			}
+
+			// Apply locked firing angle directly to body, head, and look controller without fighting vanilla AI
+			float lockedFlashYaw = persistentFloat(mData, "weaver_hypnosis_yaw", mob.getYRot());
+			mob.setYRot(lockedFlashYaw);
+			mob.yRotO = lockedFlashYaw;
+			mob.setYBodyRot(lockedFlashYaw);
+			mob.setYHeadRot(lockedFlashYaw);
+			mob.yHeadRotO = lockedFlashYaw;
+			mob.yBodyRotO = lockedFlashYaw;
+
+			double rad = Math.toRadians(lockedFlashYaw);
+			double lookX = mob.getX() - Math.sin(rad) * 10.0;
+			double lookZ = mob.getZ() + Math.cos(rad) * 10.0;
+			mob.getLookControl().setLookAt(lookX, mob.getEyeY(), lookZ, 30.0F, 30.0F);
+
+			if (flashPhase == 1) { // Charge Phase
+				updateStateAndLog(mob, mData, "FLASH_CHARGING");
+				boolean isFastCharge = persistentBoolean(mData, "isHypnotizing3", false);
+				int chargeTargetTicks = isFastCharge ? 20 : 60;
+
+				if (flashTicks % 3 == 0 || flashTicks == 1) {
+					float progress = (float) flashTicks / (float) chargeTargetTicks;
+					float volume = 6.0F + progress * 14.0F; // Escalates dramatically up to 20.0!
+					float pitch = 0.50F + progress * 1.10F;  // Ramping pitch from 0.50 to 1.60!
+					mob.level().playSound(null, mob.getX(), mob.getY(), mob.getZ(), SoundEvents.BEACON_POWER_SELECT, SoundSource.HOSTILE, volume, pitch);
+					if (flashTicks % 6 == 0) {
+						mob.level().playSound(null, mob.getX(), mob.getY(), mob.getZ(), SoundEvents.BEACON_ACTIVATE, SoundSource.HOSTILE, volume * 0.9F, pitch * 0.85F);
+					}
+				}
+
+				if (flashTicks >= chargeTargetTicks) {
+					mData.putInt("weapon_flash_phase", 2);
+					mData.putInt("weapon_flash_ticks", 0);
+				}
+				syncWeaverEntityData(mob, false, mData);
+				return;
+
+			} else if (flashPhase == 2) { // Sudden Yellow Beam Flash & Cube Cone Block Vaporization Phase
+				updateStateAndLog(mob, mData, "FLASH_BEAM_VAPORIZING");
+
+				if (flashTicks == 1) {
+					mob.level().playSound(null, mob.getX(), mob.getY(), mob.getZ(), SoundEvents.BEACON_POWER_SELECT, SoundSource.HOSTILE, 10.0F, 1.20F);
+					mob.level().playSound(null, mob.getX(), mob.getY(), mob.getZ(), SoundEvents.GENERIC_EXPLODE, SoundSource.HOSTILE, 8.0F, 1.20F);
+					mob.level().playSound(null, mob.getX(), mob.getY(), mob.getZ(), SoundEvents.RESPAWN_ANCHOR_DEPLETE, SoundSource.HOSTILE, 8.0F, 0.80F);
+				}
+
+				// Calculate Exact Beam Origin (Head Orb) matching BeamRendererWeaver.txt (height 4.20, forward 1.90)
+				Vec3 look = mob.getLookAngle();
+				Vec3 orbPos = new Vec3(
+					mob.getX() + look.x * 1.9,
+					mob.getY() + 4.2 + look.y * 1.9,
+					mob.getZ() + look.z * 1.9
+				);
+
+				Vec3 beamDir = look;
+				double maxBeamDist = 30.0;
+
+				int savedTargetId = persistentInt(mData, "weapon_flash_saved_target", 0);
+				Entity rawFlashTarget = (savedTargetId != 0) ? mob.level().getEntity(savedTargetId) : null;
+				LivingEntity flashTarget = (rawFlashTarget instanceof LivingEntity le && le.isAlive()) ? le : null;
+
+				if (flashTarget != null && mob.distanceTo(flashTarget) <= 32.0) {
+					Vec3 flashTargetEye = flashTarget.getEyePosition(1.0F);
+					Vec3 rawBeamDir = flashTargetEye.subtract(orbPos);
+					beamDir = (rawBeamDir.lengthSqr() > 1.0E-4) ? rawBeamDir.normalize() : look;
+					maxBeamDist = Math.min(30.0, mob.distanceTo(flashTarget) + 8.0);
+				} else {
+					// Fallback smoothly to look direction and maximum 30.0 dist
+					float fallbackYaw = persistentFloat(mData, "weaver_hypnosis_yaw", mob.getYRot());
+					double fallbackRad = Math.toRadians(fallbackYaw);
+					// Fallback beam direction based on locked yaw (forward vector on horizontal plane)
+					double fX = -Math.sin(fallbackRad);
+					double fZ = Math.cos(fallbackRad);
+					beamDir = new Vec3(fX, look.y, fZ);
+					if (beamDir.lengthSqr() > 1.0E-4) {
+						beamDir = beamDir.normalize();
+					} else {
+						beamDir = look;
+					}
+					maxBeamDist = 30.0;
+				}
+
+				// Build orthonormal basis for exact 4-sided square frustum pyramid beam matching BeamRendererWeaver tractor beam layer
+				Vec3 upRef = new Vec3(0, 1, 0);
+				if (Math.abs(beamDir.y) > 0.95) {
+					upRef = new Vec3(1, 0, 0);
+				}
+				Vec3 beamRight = beamDir.cross(upRef).normalize();
+				Vec3 beamUp = beamRight.cross(beamDir).normalize();
+
+				// Effectively final copies for lambda closure
+				final Vec3 finalOrbPos = orbPos;
+				final Vec3 finalBeamDir = beamDir;
+				final Vec3 finalBeamRight = beamRight;
+				final Vec3 finalBeamUp = beamUp;
+				final double finalMaxBeamDist = maxBeamDist;
+				final LivingEntity finalFlashTarget = flashTarget;
+
+				// Precise 3D Square Pyramid Frustum Block Vaporization
+				if (world instanceof ServerLevel serverLevel) {
+					// Bounding box bounds around the beam pyramid matching tractor beam layer size
+					double maxRadiusAtEnd = 0.28 + maxBeamDist * 0.070 + 1.2;
+					int minX = (int) Math.floor(Math.min(orbPos.x, orbPos.x + beamDir.x * maxBeamDist) - maxRadiusAtEnd);
+					int maxX = (int) Math.ceil(Math.max(orbPos.x, orbPos.x + beamDir.x * maxBeamDist) + maxRadiusAtEnd);
+					int minY = (int) Math.floor(Math.min(orbPos.y, orbPos.y + beamDir.y * maxBeamDist) - maxRadiusAtEnd);
+					int maxY = (int) Math.ceil(Math.max(orbPos.y, orbPos.y + beamDir.y * maxBeamDist) + maxRadiusAtEnd);
+					int minZ = (int) Math.floor(Math.min(orbPos.z, orbPos.z + beamDir.z * maxBeamDist) - maxRadiusAtEnd);
+					int maxZ = (int) Math.ceil(Math.max(orbPos.z, orbPos.z + beamDir.z * maxBeamDist) + maxRadiusAtEnd);
+
+					BlockPos.betweenClosedStream(minX, minY, minZ, maxX, maxY, maxZ).forEach(bp -> {
+						Vec3 bpCenter = new Vec3(bp.getX() + 0.5, bp.getY() + 0.5, bp.getZ() + 0.5);
+						Vec3 relVec = bpCenter.subtract(finalOrbPos);
+
+						double distAlongBeam = relVec.dot(finalBeamDir);
+						if (distAlongBeam >= 0.0 && distAlongBeam <= finalMaxBeamDist) {
+							double rightOffset = Math.abs(relVec.dot(finalBeamRight));
+							double upOffset = Math.abs(relVec.dot(finalBeamUp));
+
+							// Half-width of 4-sided square beam pyramid at distance d (start 0.28, spread rate 0.070) plus body passage clearance
+							double halfWidth = 0.45 + distAlongBeam * 0.080 + 1.25;
+
+							if (rightOffset <= halfWidth && upOffset <= halfWidth) {
+								BlockState state = world.getBlockState(bp);
+								float hardness = state.getDestroySpeed(world, bp);
+								LivingEntity beamTarget = finalFlashTarget;
+								int mobFootY = mob.blockPosition().getY();
+								int posDistSq = (int) Math.round(mob.position().distanceToSqr(bp.getX() + 0.5, mob.getY(), bp.getZ() + 0.5));
+								
+								boolean allowBreak = true;
+								// Never vaporize floor blocks directly under or within 1.5 blocks of the mob's feet
+								if (bp.getY() < mobFootY && posDistSq <= 4) {
+									allowBreak = false;
+								}
+								int effectiveMinY = (beamTarget != null) ? Math.min(mobFootY, beamTarget.blockPosition().getY()) : mobFootY;
+								if (bp.getY() < effectiveMinY) {
+									allowBreak = false;
+								}
+
+								// Instantly vaporize ALL blocks inside the cube cone shape (hardness <= 50.0, down to effective target Y level)
+								if (allowBreak && !state.isAir() && hardness >= 0.0F && hardness <= 50.0F) {
+									world.destroyBlock(bp, false);
+									serverLevel.sendParticles(ParticleTypes.EXPLOSION, bp.getX() + 0.5, bp.getY() + 0.5, bp.getZ() + 0.5, 1, 0.2, 0.2, 0.2, 0.0);
+									serverLevel.sendParticles(ParticleTypes.FLAME, bp.getX() + 0.5, bp.getY() + 0.5, bp.getZ() + 0.5, 2, 0.2, 0.2, 0.2, 0.05);
+									serverLevel.sendParticles(ParticleTypes.SMOKE, bp.getX() + 0.5, bp.getY() + 0.5, bp.getZ() + 0.5, 2, 0.2, 0.2, 0.2, 0.05);
+								}
+							}
+						}
+					});
+
+					// Damage entities caught inside the flash cone
+					AABB beamBounds = new AABB(minX, minY, minZ, maxX, maxY, maxZ);
+					for (LivingEntity e : serverLevel.getEntitiesOfClass(LivingEntity.class, beamBounds, ent -> ent != mob && ent.isAlive() && !isWoodboundOrWeaver(ent))) {
+						Vec3 eCenter = e.position().add(0, e.getBbHeight() * 0.5, 0);
+						Vec3 relVec = eCenter.subtract(orbPos);
+						double distAlongBeam = relVec.dot(beamDir);
+						if (distAlongBeam >= 0.0 && distAlongBeam <= maxBeamDist) {
+							double rightOffset = Math.abs(relVec.dot(beamRight));
+							double upOffset = Math.abs(relVec.dot(beamUp));
+							double halfWidth = 0.28 + distAlongBeam * 0.070 + 0.75;
+							if (rightOffset <= halfWidth && upOffset <= halfWidth) {
+								e.hurt(mob.damageSources().mobAttack(mob), 10.0F);
+								e.setDeltaMovement(beamDir.x * 0.6, 0.25, beamDir.z * 0.6);
+								e.hasImpulse = true;
+								if (e instanceof ServerPlayer sp) {
+									sp.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket(sp));
+								}
+							}
+						}
+					}
+				}
+
+				if (flashTicks >= 10) { // 0.5s brief flash
+					mData.putBoolean("isHypnotizing2", false);
+					mData.putBoolean("isHypnotizing3", false);
+					mData.putBoolean("isWeaponClose", true);
+					mData.putInt("weapon_flash_phase", 3);
+					mData.putInt("weapon_flash_ticks", 0);
+					mob.level().playSound(null, mob.getX(), mob.getY(), mob.getZ(), SoundEvents.BEACON_DEACTIVATE, SoundSource.HOSTILE, 8.0F, 0.60F);
+				}
+				syncWeaverEntityData(mob, false, mData);
+				return;
+
+			} else if (flashPhase == 3) { // Weaponized Closing Animation Phase (isWeaponClose)
+				updateStateAndLog(mob, mData, "FLASH_CLOSING_REVERSE");
+				mData.putBoolean("isWeaponClose", true);
+
+				if (flashTicks >= 25) {
+					mData.putBoolean("isHypnotizing2", false);
+					mData.putBoolean("isHypnotizing3", false);
+					mData.putBoolean("isWeaponClose", false);
+					mData.putBoolean("was_fast_flash", false);
+					mData.putInt("weapon_flash_phase", 0);
+					mData.putInt("weapon_flash_ticks", 0);
+
+					// Enter POST-FATIGUE STATE: Freeze movement, locked rotation, no follow-up abilities for 45 ticks (~2.25s)
+					mData.putInt("weapon_post_fatigue_ticks", 45);
+					float finalHypnoYaw = persistentFloat(mData, "weaver_hypnosis_yaw", mob.getYRot());
+					mData.putFloat("post_fatigue_yaw", finalHypnoYaw);
+					stopMobMotion(mob);
+					mob.getNavigation().stop();
+				}
+				syncWeaverEntityData(mob, false, mData);
+				return;
+			}
+		}
+
+		// EXCLUSIVE STARE CHARGING / GAZE PRE-CHARGING STATE
+		int stareTicks = persistentInt(mData, "stare_ticks", 0);
+		if (hypnoPhase == 0 && stareTicks > 0) {
+			clearOtherStates(mData, "STARE_CHARGING");
+			updateStateAndLog(mob, mData, "STARE_CHARGING");
+
+			stopMobMotion(mob);
+			mob.getNavigation().stop();
+
+			int stareTargetId = persistentInt(mData, "hypno_target_id", 0);
+			Entity rawStare = (stareTargetId != 0) ? mob.level().getEntity(stareTargetId) : null;
+			Player stareTarget = (rawStare instanceof Player p && p.isAlive()) ? p : ((mob.getTarget() instanceof Player p2) ? p2 : getNearestSurvivalPlayer(world, mob));
+			if (stareTarget != null) {
+				mData.putInt("hypno_target_id", stareTarget.getId());
+			}
+			// Keep target nulled on mob to completely suppress vanilla BodyRotationControl & MeleeAttackGoal fighting locked yaw
+			mob.setTarget(null);
+
+			hypnoCooldown = persistentInt(mData, "hypno_cooldown", 0);
+			boolean isMiningOrAttackActive = mData.getBoolean("is_block_attack") || mData.getBoolean("is_attacking");
+
+			boolean gazeMaintained = false;
+			if (hypnoCooldown <= 0 && stareTarget != null && stareTarget.isAlive() && !isMiningOrAttackActive && mob.distanceTo(stareTarget) >= 5.0 && mob.distanceTo(stareTarget) <= 20.0) {
+				boolean physBlocked = (findPhysicalObstruction(world, mob, stareTarget, 3.5) != null);
+				if (!physBlocked) {
+					Vec3 startEye = mob.getEyePosition(1.0F);
+					Vec3 targetEye = stareTarget.getEyePosition(1.0F);
+					BlockHitResult hit = world.clip(new net.minecraft.world.level.ClipContext(
+						startEye, targetEye,
+						net.minecraft.world.level.ClipContext.Block.COLLIDER,
+						net.minecraft.world.level.ClipContext.Fluid.NONE,
+						mob
+					));
+					if (hit.getType() != net.minecraft.world.phys.HitResult.Type.BLOCK) {
+						Vec3 lookVec = stareTarget.getLookAngle();
+						Vec3 toMobVec = new Vec3(mob.getX() - stareTarget.getX(), (mob.getY() + 1.8) - stareTarget.getEyeY(), mob.getZ() - stareTarget.getZ()).normalize();
+						if (lookVec.dot(toMobVec) > 0.82) {
+							gazeMaintained = true;
+						}
+					}
+				}
+			}
+
+			if (gazeMaintained) {
+				stareTicks++;
+				mData.putInt("stare_ticks", stareTicks);
+
+				// Seed hypnosis yaw if not set, then always run smooth unified handler to avoid 1-tick transition snaps
+				if (!mData.contains("weaver_hypnosis_yaw")) {
+					double dx = stareTarget.getX() - mob.getX();
+					double dz = stareTarget.getZ() - mob.getZ();
+					float directYaw = (float) (Math.atan2(dz, dx) * (180.0 / Math.PI)) - 90.0F;
+					mData.putFloat("weaver_hypnosis_yaw", directYaw);
+				}
+				updateAndApplyHypnosisYaw(mob, mData, stareTarget, true);
+
+				if (stareTicks >= 40) {
+					clearOtherStates(mData, "HYPNO");
+					setHypnoPhase(mData, 1);
+					updateStateAndLog(mob, mData, "HYPNO_OPENING");
+					mData.putInt("hypno_target_id", stareTarget.getId());
+					mData.putInt("hypno_ticks", 0);
+					mData.putInt("stare_ticks", 0);
+
+					mData.putDouble("hypno_start_x", mob.getX());
+					mData.putDouble("hypno_start_y", mob.getY());
+					mData.putDouble("hypno_start_z", mob.getZ());
+
+					double dx = stareTarget.getX() - mob.getX();
+					double dz = stareTarget.getZ() - mob.getZ();
+					float initYaw = (float) (Math.atan2(dz, dx) * (180.0 / Math.PI)) - 90.0F;
+					mData.putFloat("weaver_hypnosis_yaw", initYaw);
+					applyRotationToAll(mob, initYaw);
+
+					stopMobMotion(mob);
+					mob.setTarget(null);
+
+					syncWeaverEntityData(mob, false, mData);
+					return;
+				}
+
+				syncWeaverEntityData(mob, false, mData);
+				return;
+			} else {
+				mData.putInt("stare_ticks", 0);
+				mData.remove("weaver_hypnosis_yaw");
+			}
+		}
+
+		boolean isStaring = persistentInt(mData, "stare_ticks", 0) > 0;
+		boolean isAnyHypnoActive = (hypnoPhase != 0) || isStaring;
+
+		// STATE -1: ANIMATION PREVIEW OVERRIDE STATE ("weaver anim ...")
+		boolean isPlayingAnim = persistentBoolean(mData, "is_playing_anim", false);
+		if (isPlayingAnim) {
+			clearOtherStates(mData, "ANIM_PREVIEW");
+			updateStateAndLog(mob, mData, "ANIM_PREVIEW");
+
+			int animTimer = persistentInt(mData, "anim_timer", 0);
+			if (animTimer > 0) {
+				stopMobMotion(mob);
+				mData.putInt("anim_timer", animTimer - 1);
+				syncWeaverEntityData(mob, persistentBoolean(mData, "anim_jump", false), mData);
+				return;
+			} else {
+				clearOtherStates(mData, "NORMAL");
+				updateStateAndLog(mob, mData, "NORMAL");
+				syncWeaverEntityData(mob, false, mData);
+				return;
+			}
+		}
+
+		// HYPNO PRIORITY: Any active hypnosis state hard-locks Woodweaver motion and cancels leap/attack states
+		if (isAnyHypnoActive) {
+			clearOtherStates(mData, "HYPNO");
+		}
+
+		// Force Leap request (debug / procedure)
+		boolean forceLeap = persistentBoolean(mData, "leap_requested", false);
+		if (forceLeap) {
+			if (isAnyHypnoActive || persistentBoolean(mData, "is_leaping", false) || persistentBoolean(mData, "is_preparing_leap", false) || persistentBoolean(mData, "is_attacking", false)) {
+				mData.putBoolean("leap_requested", false);
+			} else {
+				stopMobMotion(mob);
+				double landX = persistentDouble(mData, "leap_requested_x", 0.0);
+				double landY = persistentDouble(mData, "leap_requested_y", 0.0);
+				double landZ = persistentDouble(mData, "leap_requested_z", 0.0);
+				mData.putBoolean("leap_requested", false);
+
+				if (LEAP_PREPARATION_TICKS > 0) {
+					clearOtherStates(mData, "LEAP_PREP");
+					updateStateAndLog(mob, mData, "LEAP_PREPARING");
+					mData.putBoolean("is_preparing_leap", true);
+					mData.putInt("leap_prep_ticks", 0);
+					mData.putDouble("leap_land_x", landX);
+					mData.putDouble("leap_land_y", landY);
+					mData.putDouble("leap_land_z", landZ);
+					mData.putInt("leap_cooldown", LEAP_COOLDOWN_DEFAULT);
+					syncWeaverEntityData(mob, true, mData);
+					return;
+				} else {
+					clearOtherStates(mData, "LEAPING");
+					updateStateAndLog(mob, mData, "LEAP_LAUNCH");
+					mData.putBoolean("is_leaping", true);
+					mData.putDouble("leap_land_x", landX);
+					mData.putDouble("leap_land_y", landY);
+					mData.putDouble("leap_land_z", landZ);
+					mData.putInt("leap_ticks", 0);
+					mData.putInt("leap_cooldown", LEAP_COOLDOWN_DEFAULT);
+
+					mData.putDouble("leap_start_x", mob.getX());
+					mData.putDouble("leap_start_y", mob.getY());
+					mData.putDouble("leap_start_z", mob.getZ());
+					mData.putBoolean("was_airborne", false);
+
+					double jumpDX = landX - mob.getX();
+					double jumpDY = landY - mob.getY();
+					double jumpDZ = landZ - mob.getZ();
+					double jumpHorizontalDist = Math.sqrt(jumpDX * jumpDX + jumpDZ * jumpDZ);
+					if (jumpHorizontalDist < 0.1) jumpHorizontalDist = 0.1;
+
+					double estAirTicks = Math.max(16.0, Math.min(26.0, 12.0 + jumpHorizontalDist * 0.7));
+					double horizDragFactor = (1.0 - Math.pow(0.91, estAirTicks)) / 0.09;
+					double horizSpeed = (jumpHorizontalDist / horizDragFactor) * LEAP_SPEED_MULTIPLIER;
+
+					double velX = (jumpDX / jumpHorizontalDist) * horizSpeed;
+					double velZ = (jumpDZ / jumpHorizontalDist) * horizSpeed;
+					double velY = calculateLeapVelY(estAirTicks, jumpDY);
+
+					stopMobMotion(mob);
+					mob.setDeltaMovement(velX, velY, velZ);
+					mob.hasImpulse = true;
+					mob.setOnGround(false);
+
+					float launchYaw = (float) (Math.atan2(jumpDZ, jumpDX) * 180.0 / Math.PI) - 90.0F;
+					mob.setYRot(launchYaw);
+					mob.setYBodyRot(launchYaw);
+					mob.setYHeadRot(launchYaw);
+					mData.putFloat("leap_lock_yaw", launchYaw);
+
+					mob.level().playSound(null, mob.getX(), mob.getY(), mob.getZ(), SoundEvents.SPIDER_STEP, SoundSource.HOSTILE, 1.5F, 0.40F);
+					mob.level().playSound(null, mob.getX(), mob.getY(), mob.getZ(), SoundEvents.ENDER_DRAGON_FLAP, SoundSource.HOSTILE, 1.2F, 0.60F);
+					syncWeaverEntityData(mob, true, mData);
+					return;
+				}
+			}
+		}
+
+		// STATE 2: LEAP PREPARATION STATE
+		boolean isPreparingLeap = persistentBoolean(mData, "is_preparing_leap", false);
+		if (isPreparingLeap) {
+			clearOtherStates(mData, "LEAP_PREP");
+			updateStateAndLog(mob, mData, "LEAP_PREPARING");
+			stopMobMotion(mob);
+
+			int prepTicks = persistentInt(mData, "leap_prep_ticks", 0) + 1;
+			mData.putInt("leap_prep_ticks", prepTicks);
+
+			double targetLandX = persistentDouble(mData, "leap_land_x", mob.getX());
+			double targetLandY = persistentDouble(mData, "leap_land_y", mob.getY());
+			double targetLandZ = persistentDouble(mData, "leap_land_z", mob.getZ());
+			double ldx = targetLandX - mob.getX();
+			double ldz = targetLandZ - mob.getZ();
+			float targetYaw = (float) (Math.atan2(ldz, ldx) * 180.0 / Math.PI) - 90.0F;
+			applyRotationToAll(mob, targetYaw);
+			mData.putFloat("leap_lock_yaw", targetYaw);
+
+			if (prepTicks >= LEAP_PREPARATION_TICKS) {
+				clearOtherStates(mData, "LEAPING");
+				updateStateAndLog(mob, mData, "LEAP_LAUNCH");
+				mData.putBoolean("is_preparing_leap", false);
+				mData.putInt("leap_prep_ticks", 0);
+				mData.putBoolean("is_leaping", true);
+				mData.putInt("leap_ticks", 0);
+				mData.putBoolean("was_airborne", false);
+
+				mData.putDouble("leap_start_x", mob.getX());
+				mData.putDouble("leap_start_y", mob.getY());
+				mData.putDouble("leap_start_z", mob.getZ());
+
+				double jumpDX = targetLandX - mob.getX();
+				double jumpDY = targetLandY - mob.getY();
+				double jumpDZ = targetLandZ - mob.getZ();
+				double jumpHorizontalDist = Math.sqrt(jumpDX * jumpDX + jumpDZ * jumpDZ);
+				if (jumpHorizontalDist < 0.1) jumpHorizontalDist = 0.1;
+
+				double estAirTicks = Math.max(16.0, Math.min(26.0, 12.0 + jumpHorizontalDist * 0.7));
+				double horizDragFactor = (1.0 - Math.pow(0.91, estAirTicks)) / 0.09;
+				double horizSpeed = (jumpHorizontalDist / horizDragFactor) * LEAP_SPEED_MULTIPLIER;
+
+				double velX = (jumpDX / jumpHorizontalDist) * horizSpeed;
+				double velZ = (jumpDZ / jumpHorizontalDist) * horizSpeed;
+				double velY = calculateLeapVelY(estAirTicks, jumpDY);
+
+				stopMobMotion(mob);
+				mob.setDeltaMovement(velX, velY, velZ);
+				mob.hasImpulse = true;
+				mob.setOnGround(false);
+
+				float launchYaw = (float) (Math.atan2(jumpDZ, jumpDX) * 180.0 / Math.PI) - 90.0F;
+				applyRotationToAll(mob, launchYaw);
+				mData.putFloat("leap_lock_yaw", launchYaw);
+
+				mob.level().playSound(null, mob.getX(), mob.getY(), mob.getZ(), SoundEvents.SPIDER_STEP, SoundSource.HOSTILE, 1.5F, 0.40F);
+				mob.level().playSound(null, mob.getX(), mob.getY(), mob.getZ(), SoundEvents.ENDER_DRAGON_FLAP, SoundSource.HOSTILE, 1.2F, 0.60F);
+
+				syncWeaverEntityData(mob, true, mData);
+				return;
+			}
+
+			syncWeaverEntityData(mob, true, mData);
+			return;
+		}
+
+		// STATE 3: ACTIVE LEAP STATE (PHYSICAL_LAUNCH -> AIRBORNE -> LANDING)
+		boolean isLeaping = persistentBoolean(mData, "is_leaping", false);
+		if (isLeaping) {
+			clearOtherStates(mData, "LEAPING");
+
+			int leapTicks = persistentInt(mData, "leap_ticks", 0) + 1;
+			mData.putInt("leap_ticks", leapTicks);
+
+			double startY = persistentDouble(mData, "leap_start_y", mob.getY());
+			boolean wasAirborne = persistentBoolean(mData, "was_airborne", false);
+
+			if (!mob.onGround() && (mob.getY() >= startY + 0.25 || mob.getDeltaMovement().y > 0.05)) {
+				if (!wasAirborne) {
+					wasAirborne = true;
+					mData.putBoolean("was_airborne", true);
+					updateStateAndLog(mob, mData, "LEAP_AIRBORNE");
+				}
+			}
+
+			double targetLandX = persistentDouble(mData, "leap_land_x", mob.getX());
+			double targetLandY = persistentDouble(mData, "leap_land_y", mob.getY());
+			double targetLandZ = persistentDouble(mData, "leap_land_z", mob.getZ());
+
+			if (leapTicks <= 2 && !wasAirborne) {
+				double jumpDX = targetLandX - mob.getX();
+				double jumpDY = targetLandY - mob.getY();
+				double jumpDZ = targetLandZ - mob.getZ();
+				double jumpHorizontalDist = Math.sqrt(jumpDX * jumpDX + jumpDZ * jumpDZ);
+				if (jumpHorizontalDist < 0.1) jumpHorizontalDist = 0.1;
+
+				double estAirTicks = Math.max(16.0, Math.min(26.0, 12.0 + jumpHorizontalDist * 0.7));
+				double horizDragFactor = (1.0 - Math.pow(0.91, estAirTicks)) / 0.09;
+				double horizSpeed = (jumpHorizontalDist / horizDragFactor) * LEAP_SPEED_MULTIPLIER;
+
+				double velX = (jumpDX / jumpHorizontalDist) * horizSpeed;
+				double velZ = (jumpDZ / jumpHorizontalDist) * horizSpeed;
+				double velY = calculateLeapVelY(estAirTicks, jumpDY);
+
+				mob.setDeltaMovement(velX, velY, velZ);
+				mob.hasImpulse = true;
+				mob.setOnGround(false);
+			}
+
+			boolean isLanding = wasAirborne && (mob.onGround() || leapTicks > 60);
+
+			if (isLanding) {
+				clearOtherStates(mData, "LANDING");
+				updateStateAndLog(mob, mData, "LANDING");
+				mData.putBoolean("is_landing_anim", true);
+				mData.putInt("landing_anim_timer", LANDING_ANIM_DURATION);
+
+				float landingYaw = persistentFloat(mData, "leap_lock_yaw", mob.getYRot());
+				double jumpDX = targetLandX - mob.getX();
+				double jumpDZ = targetLandZ - mob.getZ();
+				if (jumpDX * jumpDX + jumpDZ * jumpDZ > 0.001) {
+					landingYaw = (float) (Math.atan2(jumpDZ, jumpDX) * 180.0 / Math.PI) - 90.0F;
+				}
+
+				LivingEntity landTarget = mob.getTarget();
+				if (landTarget == null || !landTarget.isAlive() || isWoodboundOrWeaver(landTarget) || (landTarget instanceof Player p && (p.isCreative() || p.isSpectator()))) {
+					landTarget = getNearestSurvivalPlayer(world, mob);
+				}
+				if (landTarget != null && landTarget.isAlive()) {
+					double dx = landTarget.getX() - mob.getX();
+					double dz = landTarget.getZ() - mob.getZ();
+					if (dx * dx + dz * dz > 0.001) {
+						landingYaw = (float) (Math.atan2(dz, dx) * 180.0 / Math.PI) - 90.0F;
+					}
+				}
+				applyRotationToAll(mob, landingYaw);
+				mData.putFloat("leap_lock_yaw", landingYaw);
+				mData.putFloat("weaver_hypnosis_yaw", landingYaw);
+				stopMobMotion(mob);
+				mob.getNavigation().stop();
+
+				if (IS_SHOCKWAVE_DESTRUCTION_ENABLED) {
+					BlockPos landCenter = BlockPos.containing(mob.getX(), mob.getY() - 0.5, mob.getZ());
+					int minX = landCenter.getX() - (int) LANDING_RADIUS;
+					int maxX = landCenter.getX() + (int) LANDING_RADIUS;
+					int minY = landCenter.getY() - 1;
+					int maxY = landCenter.getY() + 1;
+					int minZ = landCenter.getZ() - (int) LANDING_RADIUS;
+					int maxZ = landCenter.getZ() + (int) LANDING_RADIUS;
+					double radiusSq = LANDING_RADIUS * LANDING_RADIUS;
+
+					BlockPos.MutableBlockPos mpos = new BlockPos.MutableBlockPos();
+					for (int bx = minX; bx <= maxX; bx++) {
+						for (int by = minY; by <= maxY; by++) {
+							for (int bz = minZ; bz <= maxZ; bz++) {
+								mpos.set(bx, by, bz);
+								if (mpos.distSqr(landCenter) <= radiusSq) {
+									BlockState state = world.getBlockState(mpos);
+									float hardness = state.getDestroySpeed(world, mpos);
+									if (!state.isAir() && hardness >= 0 && hardness < 40f) {
+										world.setBlock(mpos, net.minecraft.world.level.block.Blocks.AIR.defaultBlockState(), 2);
+									}
+								}
+							}
+						}
+					}
+				}
+
+				if (world instanceof ServerLevel serverLevel) {
+					spawnHeavyLandingShockwave(serverLevel, mob);
+				}
+
+				List<LivingEntity> nearby = world.getEntitiesOfClass(LivingEntity.class, mob.getBoundingBox().inflate(LANDING_RADIUS + 1.5), e -> e != mob && !isWoodboundOrWeaver(e));
+				for (LivingEntity victim : nearby) {
+					victim.hurt(getDamageSource(world, mob), (float) LANDING_DAMAGE);
+					Vec3 pushVec = victim.position().subtract(mob.position());
+					double hDist = Math.sqrt(pushVec.x * pushVec.x + pushVec.z * pushVec.z);
+					if (hDist > 0.01) {
+						pushVec = new Vec3(pushVec.x / hDist, 0, pushVec.z / hDist);
+					} else {
+						pushVec = new Vec3(1, 0, 0);
+					}
+					victim.setDeltaMovement(pushVec.x * 0.9, 0.3, pushVec.z * 0.9);
+					victim.hasImpulse = true;
+				}
+
+				mob.setDeltaMovement(0, -0.1, 0);
+				syncWeaverEntityData(mob, false, mData);
+				return;
+			} else {
+				if (wasAirborne) {
+					double jumpDX = targetLandX - mob.getX();
+					double jumpDZ = targetLandZ - mob.getZ();
+					if (jumpDX * jumpDX + jumpDZ * jumpDZ > 0.001) {
+						float leapYaw = (float) (Math.atan2(jumpDZ, jumpDX) * 180.0 / Math.PI) - 90.0F;
+						applyRotationToAll(mob, leapYaw);
+					}
+				} else {
+					if (leapTicks > 8) {
+						clearOtherStates(mData, "NORMAL");
+						updateStateAndLog(mob, mData, "NORMAL");
+						mData.putInt("leap_cooldown", 40);
+						syncWeaverEntityData(mob, false, mData);
+						return;
+					}
+				}
+			}
+
+			syncWeaverEntityData(mob, isLeaping, mData);
+			return;
+		}
+
+		// STATE 4: LANDING ANIMATION RECOVERY STATE
+		boolean isLandingAnimState = persistentBoolean(mData, "is_landing_anim", false) || persistentInt(mData, "landing_anim_timer", 0) > 0;
+		if (isLandingAnimState) {
+			clearOtherStates(mData, "LANDING");
+			updateStateAndLog(mob, mData, "LANDING");
+			stopMobMotion(mob);
+			mob.getNavigation().stop();
+
+			int landingAnimTimer = persistentInt(mData, "landing_anim_timer", 0);
+			if (landingAnimTimer > 0) {
+				float targetYaw = persistentFloat(mData, "leap_lock_yaw", mob.getYRot());
+				applyRotationToAll(mob, targetYaw);
+				mData.putFloat("weaver_hypnosis_yaw", targetYaw);
+
+				mData.putInt("landing_anim_timer", landingAnimTimer - 1);
+			}
+
+			if (landingAnimTimer <= 1) {
+				float finalLandingYaw = persistentFloat(mData, "leap_lock_yaw", mob.getYRot());
+				applyRotationToAll(mob, finalLandingYaw);
+				mData.putFloat("weaver_hypnosis_yaw", finalLandingYaw);
+
+				stopMobMotion(mob);
+				mob.getNavigation().stop();
+
+				LivingEntity landTarget = mob.getTarget();
+				if (landTarget == null || !landTarget.isAlive() || isWoodboundOrWeaver(landTarget) || (landTarget instanceof Player p && (p.isCreative() || p.isSpectator()))) {
+					landTarget = getNearestSurvivalPlayer(world, mob);
+					if (landTarget != null) {
+						mob.setTarget(landTarget);
+					}
+				}
+
+				hypnoCooldown = persistentInt(mData, "hypno_cooldown", 0);
+				boolean isMiningOrAttackActive = mData.getBoolean("is_block_attack") || mData.getBoolean("is_attacking");
+
+				if (hypnoCooldown <= 0 && landTarget instanceof Player playerTarget && !isMiningOrAttackActive) {
+					double distToTarget = mob.distanceTo(playerTarget);
+					if (distToTarget >= 5.0 && distToTarget <= 20.0) {
+						Vec3 startEye = mob.getEyePosition(1.0F);
+						Vec3 targetEye = playerTarget.getEyePosition(1.0F);
+						BlockHitResult hit = world.clip(new net.minecraft.world.level.ClipContext(
+							startEye, targetEye,
+							net.minecraft.world.level.ClipContext.Block.COLLIDER,
+							net.minecraft.world.level.ClipContext.Fluid.NONE,
+							mob
+						));
+						boolean isLineOfSightBlocked = hit.getType() == net.minecraft.world.phys.HitResult.Type.BLOCK;
+
+						if (!isLineOfSightBlocked) {
+							Vec3 lookVec = playerTarget.getLookAngle();
+							Vec3 toMobVec = new Vec3(mob.getX() - playerTarget.getX(), (mob.getY() + 1.8) - playerTarget.getEyeY(), mob.getZ() - playerTarget.getZ()).normalize();
+							double dot = lookVec.dot(toMobVec);
+
+							if (dot > 0.82) {
+								stareTicks = persistentInt(mData, "stare_ticks", 0) + 1;
+								mData.putInt("stare_ticks", stareTicks);
+								mData.putBoolean("is_landing_anim", false);
+								mData.putInt("landing_anim_timer", 0);
+								clearOtherStates(mData, "STARE_CHARGING");
+								updateStateAndLog(mob, mData, "STARE_CHARGING");
+
+								stopMobMotion(mob);
+								mob.getNavigation().stop();
+								updateAndApplyHypnosisYaw(mob, mData, playerTarget, true);
+
+								syncWeaverEntityData(mob, false, mData);
+								return;
+							}
+						}
+					}
+				}
+
+				mData.putBoolean("is_landing_anim", false);
+				mData.putInt("landing_anim_timer", 0);
+				clearOtherStates(mData, "NORMAL");
+				updateStateAndLog(mob, mData, "NORMAL");
+				syncWeaverEntityData(mob, false, mData);
+				return;
+			} else {
+				mData.putBoolean("is_landing_anim", true);
+			}
+
+			syncWeaverEntityData(mob, false, mData);
+			return;
+		}
+
+		// STATE 5: MELEE / MINING ATTACK STATE (Supports 7 attack types)
+		boolean isAttacking = persistentBoolean(mData, "is_attacking", false);
+		if (isAttacking) {
+			clearOtherStates(mData, "ATTACKING");
+			updateStateAndLog(mob, mData, "ATTACKING");
+			int attackTime = persistentInt(mData, "attack_timer", 0);
+			boolean isBlockAttack = mData.getBoolean("is_block_attack");
+			float attackYaw = persistentFloat(mData, "attack_facing_yaw", mob.getYRot());
+
+			if (isBlockAttack) {
+				// MINING STATE: Lock facing to selected block and fully stop movement/navigation while mining
+				stopMobMotion(mob);
+				long blockPosLong = mData.getLong("attack_block_pos");
+				if (blockPosLong != 0) {
+					BlockPos minePos = BlockPos.of(blockPosLong);
+					double dx_block = minePos.getX() + 0.5 - mob.getX();
+					double dz_block = minePos.getZ() + 0.5 - mob.getZ();
+					if (dx_block * dx_block + dz_block * dz_block > 0.001) {
+						attackYaw = (float) (Math.atan2(dz_block, dx_block) * (180.0 / Math.PI)) - 90.0F;
+						applyRotationToAll(mob, attackYaw);
+						mData.putFloat("attack_facing_yaw", attackYaw);
+					}
+				} else {
+					applyRotationToAll(mob, attackYaw);
+				}
+			} else {
+				// MELEE ATTACK STATE: Lock facing to the attack target for the attack
+				LivingEntity attackTarget = mob.getTarget();
+
+				// Dynamic Melee Spacing: allow Woodweaver to move towards target during claw swings, but maintain comfortable distance (don't ram bounding box)
+				if (attackTarget != null && attackTarget.isAlive()) {
+					double distToTarget = mob.distanceTo(attackTarget);
+					if (distToTarget < 2.8) {
+						// Within ideal claw strike distance (2.8m): stop forward movement so it doesn't ram or clip player's bounding box
+						mob.getNavigation().stop();
+						mob.setDeltaMovement(0.0, mob.getDeltaMovement().y, 0.0);
+					} else if (distToTarget <= 6.0) {
+						// Advance steadily towards target during claw swing
+						mob.getNavigation().moveTo(attackTarget.getX(), attackTarget.getY(), attackTarget.getZ(), 1.05);
+					}
+					
+					// Smoothly face target during melee swing
+					double dx = attackTarget.getX() - mob.getX();
+					double dz = attackTarget.getZ() - mob.getZ();
+					if (dx * dx + dz * dz > 0.001) {
+						float targetYaw = (float) (Math.atan2(dz, dx) * (180.0 / Math.PI)) - 90.0F;
+						float currentYaw = mob.getYRot();
+						float yawDiff = net.minecraft.util.Mth.wrapDegrees(targetYaw - currentYaw);
+						attackYaw = currentYaw + yawDiff * 0.20F;
+						applyRotationToAll(mob, attackYaw);
+						mData.putFloat("attack_facing_yaw", attackYaw);
+					}
+				} else {
+					applyRotationToAll(mob, attackYaw);
+				}
+			}
+
+			int attackType = persistentInt(mData, "attack_type", 1);
+			int targetPeakTick = persistentInt(mData, "attack_peak_tick", ATTACK_DAMAGE_TICK);
+
+			if (attackTime == MELEE_ATTACK_DURATION - targetPeakTick) {
+				if (isBlockAttack) {
+					long blockPosLong = mData.getLong("attack_block_pos");
+					if (blockPosLong != 0) {
+						BlockPos minePos = BlockPos.of(blockPosLong);
+						double rad = Math.toRadians(attackYaw);
+						double fX = -Math.sin(rad);
+						double fZ = Math.cos(rad);
+						double rX = Math.cos(rad);
+						double rZ = Math.sin(rad);
+
+						LivingEntity currentTarget = mob.getTarget();
+
+						// Guaranteed full physical clearance box around minePos so Woodweaver's large bounding box passes through completely
+						BlockPos.MutableBlockPos clearPos = new BlockPos.MutableBlockPos();
+						for (int yOff = 0; yOff <= 3; yOff++) {
+							for (double fOff = -1.5; fOff <= 1.5; fOff += 0.75) {
+								for (double rOff = -1.8; rOff <= 1.8; rOff += 0.75) {
+									int cx = (int) Math.floor(minePos.getX() + 0.5 + fX * fOff + rX * rOff);
+									int cy = minePos.getY() + yOff;
+									int cz = (int) Math.floor(minePos.getZ() + 0.5 + fZ * fOff + rZ * rOff);
+									clearPos.set(cx, cy, cz);
+									if (canMine(world, clearPos, mob, currentTarget)) {
+										BlockState clearState = world.getBlockState(clearPos);
+										world.destroyBlock(clearPos, true);
+										if (world instanceof ServerLevel level) {
+											level.sendParticles(new net.minecraft.core.particles.BlockParticleOption(ParticleTypes.BLOCK, clearState), cx + 0.5, cy + 0.5, cz + 0.5, 3, 0.15, 0.15, 0.15, 0.05);
+										}
+									}
+								}
+							}
+						}
+
+						// Generate randomized shift offsets per attack swing so successive claw slashes carve different sections of the 6x6 area
+						double swingShiftS = (mob.getRandom().nextDouble() - 0.5) * 1.6;
+						double swingShiftY = (mob.getRandom().nextDouble() - 0.5) * 1.6;
+
+						// Visual sweep centered on minePos to carve parallel scratch lines (constrained to walkable floor boundary)
+						int minMineX = minePos.getX() - 3;
+						int maxMineX = minePos.getX() + 3;
+						int minMineY = minePos.getY();
+						int maxMineY = minePos.getY() + 4;
+						int minMineZ = minePos.getZ() - 3;
+						int maxMineZ = minePos.getZ() + 3;
+
+						BlockPos.MutableBlockPos mpos = new BlockPos.MutableBlockPos();
+						for (int bx = minMineX; bx <= maxMineX; bx++) {
+							for (int by = minMineY; by <= maxMineY; by++) {
+								for (int bz = minMineZ; bz <= maxMineZ; bz++) {
+									mpos.set(bx, by, bz);
+									double dx = bx - minePos.getX();
+									double dy = by - minePos.getY();
+									double dz = bz - minePos.getZ();
+									double s = dx * rX + dz * rZ;
+
+									// We generate stable deterministic noise to make scratch boundaries look beautifully jagged
+									// Lower frequency to prevent "pinching" that creates floating blocks
+									double noise = Math.sin(bx * 0.15 + by * 0.2 + bz * 0.15) * 0.4;
+									
+									boolean inScratch = false;
+
+									// Apply the swing shift offsets to create a progressive tearing/shredding effect across multiple hits
+									double shiftedS = s + swingShiftS;
+									double shiftedY = dy + swingShiftY;
+									
+									// Calculate distance from center to dynamically taper the scratch thickness
+									double distFromCenter = Math.sqrt(shiftedS * shiftedS + shiftedY * shiftedY);
+									// Center thickness is 0.8 (merges for clearance), tapers down to sharp 0.3 at edges
+									double dynamicThickness = Math.max(0.3, 0.8 - (distFromCenter * 0.15));
+
+									if (attackType == 3) { // Attack Both (Parallel vertical claw scrapes)
+										for (double cx : new double[]{-2.0, -0.7, 0.7, 2.0}) {
+											if (Math.abs(shiftedS - (cx + noise)) <= dynamicThickness && shiftedY >= -3.5 && shiftedY <= 3.5) {
+												inScratch = true;
+											}
+										}
+									} else if (attackType == 6 || attackType == 7) { // Sweep Left / Sweep Right
+										double slope = (attackType == 7) ? 0.35 : -0.35;
+										for (double cy : new double[]{-1.8, -0.6, 0.6, 1.8}) {
+											if (Math.abs(shiftedY - (slope * shiftedS + cy + noise)) <= dynamicThickness && Math.abs(shiftedS) <= 3.5) {
+												inScratch = true;
+											}
+										}
+									} else if (attackType == 4 || attackType == 5) { // Hook Left / Right (Steeper arcs)
+										double slope = (attackType == 4) ? -0.65 : 0.65;
+										for (double cy : new double[]{-1.8, -0.6, 0.6, 1.8}) {
+											if (Math.abs(shiftedY - (slope * shiftedS + cy + noise)) <= dynamicThickness && Math.abs(shiftedS) <= 3.5) {
+												inScratch = true;
+											}
+										}
+									} else { // Diagonal Slash (Type 1, 2)
+										double slope = (attackType == 1) ? -0.9 : 0.9;
+										for (double cy : new double[]{-1.5, -0.5, 0.5, 1.5}) {
+											if (Math.abs(shiftedY - (slope * shiftedS + cy + noise)) <= dynamicThickness && Math.abs(shiftedS) <= 3.2) {
+												inScratch = true;
+											}
+										}
+									}
+
+									if (inScratch && canMine(world, mpos, mob, currentTarget)) {
+										BlockState bpState = world.getBlockState(mpos);
+										float bpHardness = bpState.getDestroySpeed(world, mpos);
+										if (!bpState.isAir() && bpHardness >= 0 && bpHardness <= MAX_CLAW_BLOCK_HARDNESS) {
+											world.destroyBlock(mpos, true);
+											if (world instanceof ServerLevel level) {
+												level.sendParticles(new net.minecraft.core.particles.BlockParticleOption(ParticleTypes.BLOCK, bpState), bx + 0.5, by + 0.5, bz + 0.5, 5, 0.2, 0.2, 0.2, 0.05);
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+					mob.level().playSound(null, mob.getX(), mob.getY() + 1.2, mob.getZ(), SoundEvents.PLAYER_ATTACK_STRONG, SoundSource.HOSTILE, 1.2F, 0.6F);
+					mob.level().playSound(null, mob.getX(), mob.getY() + 1.2, mob.getZ(), SoundEvents.IRON_GOLEM_ATTACK, SoundSource.HOSTILE, 1.0F, 0.5F);
+				}
+
+				// Melee entity damage hit detection (runs for ALL 7 attack types)
+				double yawRad = Math.toRadians(attackYaw);
+				double fX = -Math.sin(yawRad);
+				double fZ = Math.cos(yawRad);
+				double rX = Math.cos(yawRad);
+				double rZ = Math.sin(yawRad);
+
+				// Determine attack geometry parameters based on attackType (1-7)
+				double sideMult = 0.0;
+				double frontMult = 1.0;
+
+				switch (attackType) {
+					case 1: // Attack Left (Left Arm Claw)
+						sideMult = -1.0;
+						frontMult = 1.0;
+						break;
+					case 2: // Attack Right (Right Arm Claw)
+						sideMult = 1.0;
+						frontMult = 1.0;
+						break;
+					case 3: // Attack Both / Stab (Thrust forward into ground)
+						sideMult = 0.0;
+						frontMult = 1.15;
+						break;
+					case 4: // Hook Left
+						sideMult = -1.4;
+						frontMult = 0.9;
+						break;
+					case 5: // Hook Right
+						sideMult = 1.4;
+						frontMult = 0.9;
+						break;
+					case 6: // Sweep Left
+						sideMult = -1.8;
+						frontMult = 1.05;
+						break;
+					case 7: // Sweep Right
+						sideMult = 1.8;
+						frontMult = 1.05;
+						break;
+					default:
+						sideMult = 0.0;
+						frontMult = 1.0;
+						break;
+				}
+
+				double mobX = mob.getX();
+				double mobY = mob.getY();
+				double mobZ = mob.getZ();
+
+				double clawFront = CLAW_FRONT_OFFSET * frontMult;
+				double clawSide = CLAW_SIDE_OFFSET * sideMult;
+				double clawY = mobY + CLAW_HEIGHT_OFFSET;
+
+				double clawX = mobX + fX * clawFront + rX * clawSide;
+				double clawZ = mobZ + fZ * clawFront + rZ * clawSide;
+				Vec3 clawImpactPos = new Vec3(clawX, clawY, clawZ);
+
+				// Special ground shockwave & impact destruction for both-arm ground stab / hammer (attackType == 3)
+				if (attackType == 3) {
+					double impactX = mobX + fX * clawFront;
+					double impactZ = mobZ + fZ * clawFront;
+					double impactY = mobY;
+					BlockPos impactBP = BlockPos.containing(impactX, impactY, impactZ);
+
+					if (world instanceof ServerLevel serverLevel) {
+						for (int i = 0; i < 16; i++) {
+							double angle = (2.0 * Math.PI / 16) * i;
+							double px = impactX + Math.cos(angle) * 1.6;
+							double pz = impactZ + Math.sin(angle) * 1.6;
+							serverLevel.sendParticles(ParticleTypes.CAMPFIRE_COSY_SMOKE, px, impactY + 0.1, pz, 1, 0.05, 0.12, 0.05, 0.02);
+							serverLevel.sendParticles(ParticleTypes.POOF, px, impactY + 0.1, pz, 1, 0.1, 0.18, 0.1, 0.04);
+						}
+						serverLevel.sendParticles(ParticleTypes.EXPLOSION, impactX, impactY + 0.2, impactZ, 1, 0.0, 0.0, 0.0, 0.0);
+					}
+
+					mob.level().playSound(null, impactX, impactY, impactZ, SoundEvents.GENERIC_EXPLODE, SoundSource.HOSTILE, 1.2F, 0.7F);
+					mob.level().playSound(null, impactX, impactY, impactZ, SoundEvents.ZOMBIE_ATTACK_WOODEN_DOOR, SoundSource.HOSTILE, 1.5F, 0.5F);
+					mob.level().playSound(null, impactX, impactY, impactZ, SoundEvents.STONE_BREAK, SoundSource.HOSTILE, 1.5F, 0.6F);
+
+					BlockPos.betweenClosedStream(impactBP.offset(-1, -1, -1), impactBP.offset(1, 2, 1)).forEach(bp -> {
+						double distSq = bp.distSqr(impactBP);
+						if (distSq <= 3.2) {
+							BlockState bpState = world.getBlockState(bp);
+							float bpHardness = bpState.getDestroySpeed(world, bp);
+							if (!bpState.isAir() && bpHardness >= 0 && bpHardness <= MAX_CLAW_BLOCK_HARDNESS) {
+								if (mob.getRandom().nextFloat() < 0.70) {
+									world.destroyBlock(bp, true);
+									if (world instanceof ServerLevel level) {
+										level.sendParticles(new net.minecraft.core.particles.BlockParticleOption(ParticleTypes.BLOCK, bpState), bp.getX() + 0.5, bp.getY() + 0.5, bp.getZ() + 0.5, 5, 0.2, 0.2, 0.2, 0.05);
+									}
+								}
+							}
+						}
+					});
+				}
+
+				AABB searchBox = new AABB(
+					mobX - 6.5, mobY - 2.0, mobZ - 6.5,
+					mobX + 6.5, mobY + 6.5, mobZ + 6.5
+				);
+
+				List<LivingEntity> targets = world.getEntitiesOfClass(LivingEntity.class, searchBox, e -> e != mob && !isWoodboundOrWeaver(e));
+				for (LivingEntity targetEntity : targets) {
+					AABB targetBox = targetEntity.getBoundingBox();
+					double distSq = targetBox.distanceToSqr(clawImpactPos);
+					boolean isHit = distSq <= (CLAW_HIT_RADIUS * CLAW_HIT_RADIUS);
+
+					double dx = targetEntity.getX() - mobX;
+					double dz = targetEntity.getZ() - mobZ;
+					double f = dx * fX + dz * fZ;
+					double s = dx * rX + dz * rZ;
+
+					if (!isHit && f >= 0.5 && f <= 5.8) {
+						double ds = s - clawSide;
+						double relY = (targetEntity.getY() + targetEntity.getBbHeight() * 0.5) - clawY;
+						if (Math.abs(ds) <= 2.2 && Math.abs(relY) <= 2.5) {
+							isHit = true;
+						}
+					}
+
+					if (isHit) {
+						targetEntity.hurt(getDamageSource(world, mob), 18.0F);
+
+						// MELEE ATTACKS VS SHIELDS: Disable shields and force randomized 2-7s (40-140 ticks) cooldown if target is blocking
+						if (targetEntity instanceof Player blockingPlayer && blockingPlayer.isBlocking()) {
+							int disableTicks = 40 + mob.getRandom().nextInt(101); // 40 to 140 ticks (2.0s to 7.0s)
+							blockingPlayer.getCooldowns().addCooldown(blockingPlayer.getUseItem().getItem(), disableTicks);
+							blockingPlayer.stopUsingItem();
+							mob.level().playSound(null, blockingPlayer.getX(), blockingPlayer.getY(), blockingPlayer.getZ(), SoundEvents.SHIELD_BREAK, SoundSource.HOSTILE, 1.3F, 0.8F);
+							if (world instanceof ServerLevel serverLevel) {
+								serverLevel.sendParticles(ParticleTypes.CRIT, blockingPlayer.getX(), blockingPlayer.getY() + 1.0, blockingPlayer.getZ(), 18, 0.3, 0.3, 0.3, 0.2);
+							}
+						}
+
+						double kx, ky, kz;
+						double tYaw = targetEntity.getYRot();
+						double tRad = Math.toRadians(tYaw);
+
+						if (attackType == 4) { // Left Hook: Left claw reaches out and hooks inward toward center-left
+							kx = (fX * 0.8 - rX * 1.5);
+							kz = (fZ * 0.8 - rZ * 1.5);
+							ky = 0.25;
+						} else if (attackType == 5) { // Right Hook: Right claw reaches out and hooks inward toward center-right
+							kx = (fX * 0.8 + rX * 1.5);
+							kz = (fZ * 0.8 + rZ * 1.5);
+							ky = 0.25;
+						} else if (attackType == 6) { // Sweep Left: Left claw sweeps across to the right (up-right / across)
+							kx = (fX * 1.0 + rX * 2.0);
+							kz = (fZ * 1.0 + rZ * 2.0);
+							ky = 0.35;
+						} else if (attackType == 7) { // Sweep Right: Right claw sweeps across to the left (down-left / across)
+							kx = (fX * 1.0 - rX * 2.0);
+							kz = (fZ * 1.0 - rZ * 2.0);
+							ky = 0.35;
+						} else if (attackType == 3) { // Attack Both: Dual downward slam/stab (↓ ↓)
+							kx = fX * 1.40;
+							kz = fZ * 1.40;
+							ky = 0.12;
+						} else { // Standard Slashes (1, 2)
+							Vec3 away = targetEntity.position().subtract(mob.position());
+							double d2d = Math.sqrt(away.x * away.x + away.z * away.z);
+							double dirX = d2d > 0.001 ? away.x / d2d : fX;
+							double dirZ = d2d > 0.001 ? away.z / d2d : fZ;
+							kx = dirX * 0.90;
+							kz = dirZ * 0.90;
+							ky = 0.25;
+						}
+
+						targetEntity.setDeltaMovement(kx, ky, kz);
+						targetEntity.hasImpulse = true;
+						if (targetEntity instanceof ServerPlayer sp) {
+							sp.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket(sp));
+						}
+					}
+				}
+
+				mob.level().playSound(null, clawX, clawY, clawZ, SoundEvents.PLAYER_ATTACK_STRONG, SoundSource.HOSTILE, 1.2F, 0.6F);
+				mob.level().playSound(null, clawX, clawY, clawZ, SoundEvents.IRON_GOLEM_ATTACK, SoundSource.HOSTILE, 1.0F, 0.5F);
+
+				if (IS_CLAW_DESTRUCTION_ENABLED && !isBlockAttack) {
+					BlockPos centerBP = BlockPos.containing(mobX, mobY, mobZ);
+					BlockPos.betweenClosedStream(centerBP.offset(-6, -2, -6), centerBP.offset(6, 6, 6)).forEach(bp -> {
+						double dx = bp.getX() + 0.5 - mobX;
+						double dz = bp.getZ() + 0.5 - mobZ;
+						double f = dx * fX + dz * fZ;
+						double s = dx * rX + dz * rZ;
+						double relY = bp.getY() - mobY;
+
+						if (f >= 0.5 && f <= 5.5) {
+							boolean shouldDestroy = false;
+
+							if (attackType == 6 || attackType == 7 || attackType == 4 || attackType == 5) {
+								// Hooks & Sweeps: Horizontal ribbon path cut through terrain/walls at claw height
+								double ds = s - clawSide;
+								double dy = relY - CLAW_HEIGHT_OFFSET;
+								if (Math.abs(dy) <= 0.85 && Math.abs(ds) <= 2.2) {
+									shouldDestroy = (mob.getRandom().nextFloat() < 0.70);
+								}
+							} else if (attackType == 3) {
+								// Stab / Both-arm Hammer: Vertically oriented path/slice
+								if (Math.abs(s) <= 0.85 && relY >= -0.5 && relY <= 3.2) {
+									shouldDestroy = (mob.getRandom().nextFloat() < 0.75);
+								}
+							} else {
+								// Slashes (1, 2): Diagonal claw path cut
+								double targetY = (attackType == 1) ? (CLAW_HEIGHT_OFFSET - (s - clawSide) * 0.7) : (CLAW_HEIGHT_OFFSET + (s - clawSide) * 0.7);
+								double dy = relY - targetY;
+								double ds = s - clawSide;
+								if (Math.abs(dy) <= 0.9 && Math.abs(ds) <= 2.0) {
+									shouldDestroy = (mob.getRandom().nextFloat() < 0.70);
+								}
+							}
+
+							if (shouldDestroy) {
+								BlockState state = world.getBlockState(bp);
+								float hardness = state.getDestroySpeed(world, bp);
+								if (!state.isAir() && hardness >= 0 && hardness <= MAX_CLAW_BLOCK_HARDNESS) {
+									world.destroyBlock(bp, true);
+									if (world instanceof ServerLevel level) {
+										level.sendParticles(new net.minecraft.core.particles.BlockParticleOption(ParticleTypes.BLOCK, state), bp.getX() + 0.5, bp.getY() + 0.5, bp.getZ() + 0.5, 4, 0.1, 0.1, 0.1, 0.05);
+									}
+								}
+							}
+						}
+					});
+				}
+			}
+
+			if (attackTime <= 0) {
+				mData.putBoolean("is_block_attack", false);
+				mData.putLong("attack_block_pos", 0);
+				clearOtherStates(mData, "NORMAL");
+				updateStateAndLog(mob, mData, "NORMAL");
+				syncWeaverEntityData(mob, false, mData);
+				return;
+			}
+
+			syncWeaverEntityData(mob, false, mData);
+			return;
+		}
+
+		// GENERAL DECISION MAKING AND ACTIONS (STATE 0: NORMAL CHASE / IDLE)
+		updateStateAndLog(mob, mData, "NORMAL");
+
+
+		// 2. Target Validation
+		LivingEntity target = mob.getTarget();
+		boolean isTargetValid = false;
+		if (target != null && target.isAlive() && !isWoodboundOrWeaver(target)) {
+			if (target instanceof Player p) {
+				if (p instanceof ServerPlayer sp && sp.gameMode.getGameModeForPlayer() == net.minecraft.world.level.GameType.SURVIVAL) {
+					isTargetValid = true;
+				}
+			} else {
+				isTargetValid = true;
+			}
+		}
+
+		if (!isTargetValid) {
+			mob.setTarget(null);
+			target = null;
+		}
+
+		// 3. Search: Automatically acquire nearest Survival Player
+		if (target == null) {
+			Player nearestSurvival = getNearestSurvivalPlayer(world, mob);
+			if (nearestSurvival != null) {
+				mob.setTarget(nearestSurvival);
+				target = nearestSurvival;
+			}
+		}
+
+		if (target != null && target.isAlive()) {
+			double distToTarget = mob.distanceTo(target);
+
+			// =========================================================================
+			// COGNITIVE LAYER: PERCEPTION & DIRECT-STARE TRACTOR BEAM MECHANIC
+			// =========================================================================
+			boolean isPillaring = isTargetPillaring(world, target, mob);
+			Vec3 startEye = mob.getEyePosition(1.0F);
+			Vec3 targetEye = target.getEyePosition(1.0F);
+			BlockHitResult hit = world.clip(new net.minecraft.world.level.ClipContext(
+				startEye, targetEye,
+				net.minecraft.world.level.ClipContext.Block.COLLIDER,
+				net.minecraft.world.level.ClipContext.Fluid.NONE,
+				mob
+			));
+			boolean isLineOfSightBlocked = hit.getType() == net.minecraft.world.phys.HitResult.Type.BLOCK;
+
+			mData.putBoolean("is_circling", false);
+			Vec3 clawOrigin = new Vec3(mob.getX(), mob.getY() + 4.5, mob.getZ());
+
+			if (isPillaring) {
+				int toweringCircleTicks = persistentInt(mData, "towering_circle_ticks", 0);
+				if (toweringCircleTicks < 80) {
+					mData.putInt("towering_circle_ticks", toweringCircleTicks + 1);
+					performSmoothCircling(mob, mData, target, world, 10.0, 1.25);
+					syncWeaverEntityData(mob, false, mData);
+					return;
+				} else {
+					BlockPos minePos = null;
+					int targetY = (int) target.getY();
+					int selfY = (int) mob.getY();
+					
+					outerLoop:
+					for (int scanY = targetY - 1; scanY >= selfY; scanY--) {
+						for (int dx = -1; dx <= 1; dx++) {
+							for (int dz = -1; dz <= 1; dz++) {
+								BlockPos bp = BlockPos.containing(target.getX() + dx, scanY, target.getZ() + dz);
+								if (canMine(world, bp, mob, target)) {
+									double dist = clawOrigin.distanceTo(new Vec3(bp.getX() + 0.5, bp.getY() + 0.5, bp.getZ() + 0.5));
+									if (dist <= 5.5) {
+										minePos = bp;
+										break outerLoop;
+									}
+								}
+							}
+						}
+					}
+
+					if (minePos != null) {
+						stopMobMotion(mob);
+						clearOtherStates(mData, "ATTACKING");
+						updateStateAndLog(mob, mData, "PLATFORM_DESTRUCTION");
+						mData.putBoolean("is_attacking", true);
+						
+						int chooseAttack = mob.getRandom().nextInt(7) + 1;
+						mData.putInt("attack_type", chooseAttack);
+						
+						int peakTick = 15;
+						if (chooseAttack == 4 || chooseAttack == 5) peakTick = 12;
+						else if (chooseAttack == 6 || chooseAttack == 7) peakTick = 25;
+						mData.putInt("attack_peak_tick", peakTick);
+						mData.putInt("attack_timer", MELEE_ATTACK_DURATION);
+						mData.putBoolean("is_block_attack", true);
+						mData.putLong("attack_block_pos", minePos.asLong());
+
+						double dx_block = minePos.getX() + 0.5 - mob.getX();
+						double dz_block = minePos.getZ() + 0.5 - mob.getZ();
+						float attackYaw = (float) (Math.atan2(dz_block, dx_block) * (180.0 / Math.PI)) - 90.0F;
+						mob.setYRot(attackYaw);
+						mob.setYBodyRot(attackYaw);
+						mob.setYHeadRot(attackYaw);
+						mData.putFloat("attack_facing_yaw", attackYaw);
+
+						syncWeaverEntityData(mob, false, mData);
+						return;
+					} else {
+						mob.getNavigation().moveTo(target.getX(), mob.getY(), target.getZ(), 1.25);
+						updateStateAndLog(mob, mData, "TOWER_APPROACHING");
+						syncWeaverEntityData(mob, false, mData);
+						return;
+					}
+				}
+			} else {
+				mData.putInt("towering_circle_ticks", 0);
+			}
+
+			// Decrement weapon flash cooldown
+			int weaponFlashCooldown = persistentInt(mData, "weapon_flash_cooldown", 0);
+			if (weaponFlashCooldown > 0) {
+				mData.putInt("weapon_flash_cooldown", weaponFlashCooldown - 1);
+			}
+
+			BlockPos physicalObstruction = findPhysicalObstruction(world, mob, target, 6.0);
+			boolean isPhysicallyBlocked = (physicalObstruction != null);
+
+			if (isPhysicallyBlocked) {
+				mData.putInt("stare_ticks", 0);
+				BlockPos minePos = physicalObstruction;
+
+				// Trigger Weaponized Flash Special Move when obstruction is encountered and off cooldown
+				if (weaponFlashCooldown <= 0 && mob.getRandom().nextFloat() < 0.35F) {
+					clearOtherStates(mData, "FLASH");
+					mData.putInt("weapon_flash_cooldown", 400); // 20s cooldown (special move)
+					mData.putInt("weapon_flash_phase", 1);
+					mData.putInt("weapon_flash_ticks", 0);
+					mData.putBoolean("isWeaponClose", false);
+
+					// Store start anchor positions to completely eliminate entity drift & wobbling
+					mData.putDouble("hypno_start_x", mob.getX());
+					mData.putDouble("hypno_start_y", mob.getY());
+					mData.putDouble("hypno_start_z", mob.getZ());
+					mData.putInt("weapon_flash_saved_target", target.getId());
+
+					double dx = target.getX() - mob.getX();
+					double dz = target.getZ() - mob.getZ();
+					if (dx * dx + dz * dz > 0.001) {
+						float directYaw = (float) (Math.atan2(dz, dx) * (180.0 / Math.PI)) - 90.0F;
+						mData.putFloat("weaver_hypnosis_yaw", directYaw);
+						mob.setYRot(directYaw);
+						mob.yRotO = directYaw;
+						mob.setYBodyRot(directYaw);
+						mob.setYHeadRot(directYaw);
+						mob.yHeadRotO = directYaw;
+						mob.yBodyRotO = directYaw;
+
+						double rad = Math.toRadians(directYaw);
+						double lookX = mob.getX() - Math.sin(rad) * 10.0;
+						double lookZ = mob.getZ() + Math.cos(rad) * 10.0;
+						mob.getLookControl().setLookAt(lookX, mob.getEyeY(), lookZ, 30.0F, 30.0F);
+					}
+
+					// Randomly choose opening animation between isHypnotizing2 (3.0s) and isHypnotizing3 (1.0s)
+					boolean chooseHypno3 = mob.getRandom().nextBoolean();
+					if (chooseHypno3) {
+						mData.putBoolean("isHypnotizing3", true);
+						mData.putBoolean("isHypnotizing2", false);
+						mData.putBoolean("was_fast_flash", true);
+					} else {
+						mData.putBoolean("isHypnotizing2", true);
+						mData.putBoolean("isHypnotizing3", false);
+						mData.putBoolean("was_fast_flash", false);
+					}
+
+					stopMobMotion(mob);
+					mob.getNavigation().stop();
+					syncWeaverEntityData(mob, false, mData);
+					return;
+				}
+
+				if (canMine(world, minePos, mob, target)) {
+					mData.putInt("hard_block_wait_ticks", 0);
+					// Measure 3D distance from mob center/eye position to minePos
+					double distToMine = mob.getEyePosition().distanceTo(new Vec3(minePos.getX() + 0.5, minePos.getY() + 0.5, minePos.getZ() + 0.5));
+
+					// Mine through obstruction if within claw mining reach (6.0 blocks)
+					if (distToMine <= 6.0) {
+						stopMobMotion(mob);
+						if (!mData.getBoolean("is_block_attack")) {
+							clearOtherStates(mData, "ATTACKING");
+							updateStateAndLog(mob, mData, "OBSTRUCTION_DESTRUCTION");
+							mData.putBoolean("is_attacking", true);
+							
+							int chooseAttack = mob.getRandom().nextInt(7) + 1;
+							mData.putInt("attack_type", chooseAttack);
+							
+							int peakTick = 15;
+							if (chooseAttack == 4 || chooseAttack == 5) peakTick = 12;
+							else if (chooseAttack == 6 || chooseAttack == 7) peakTick = 25;
+							mData.putInt("attack_peak_tick", peakTick);
+							mData.putInt("attack_timer", MELEE_ATTACK_DURATION);
+							mData.putBoolean("is_block_attack", true);
+							mData.putLong("attack_block_pos", minePos.asLong());
+
+							double dx_block = minePos.getX() + 0.5 - mob.getX();
+							double dz_block = minePos.getZ() + 0.5 - mob.getZ();
+							float attackYaw = (float) (Math.atan2(dz_block, dx_block) * (180.0 / Math.PI)) - 90.0F;
+							mob.setYRot(attackYaw);
+							mob.setYBodyRot(attackYaw);
+							mob.setYHeadRot(attackYaw);
+							mData.putFloat("attack_facing_yaw", attackYaw);
+
+							syncWeaverEntityData(mob, false, mData);
+							return;
+						} else {
+							syncWeaverEntityData(mob, false, mData);
+							return;
+						}
+					}
+				} else {
+					// Encountered unmineable / harder block (e.g. Obsidian, Bedrock, or hardness > MAX_CLAW_BLOCK_HARDNESS)
+					int waitTicks = persistentInt(mData, "hard_block_wait_ticks", 0) + 1;
+					mData.putInt("hard_block_wait_ticks", waitTicks);
+
+					mob.getLookControl().setLookAt(target, 30.0F, 30.0F);
+
+					if (waitTicks < 120) { // Wait up to 6 seconds (120 ticks) for player to emerge or move into sight
+						mob.getNavigation().moveTo(minePos.getX() + 0.5, minePos.getY(), minePos.getZ() + 0.5, 0.8);
+						updateStateAndLog(mob, mData, "WAITING_HARD_BLOCK");
+						syncWeaverEntityData(mob, false, mData);
+						return;
+					} else {
+						// Give up on target behind unmineable hard blocks!
+						mData.putInt("hard_block_wait_ticks", 0);
+						updateStateAndLog(mob, mData, "GIVING_UP_HARD_BLOCK");
+						mob.setTarget(null);
+
+						Player newTarget = getNearestSurvivalPlayer(world, mob);
+						if (newTarget != null && !newTarget.equals(target)) {
+							mob.setTarget(newTarget);
+						}
+						syncWeaverEntityData(mob, false, mData);
+						return;
+					}
+				}
+				syncWeaverEntityData(mob, false, mData);
+				return;
+			} else {
+				mData.putInt("hard_block_wait_ticks", 0);
+			}
+
+			// DIRECT-STARE & HYPNOSIS INITIALIZATION TRIGGER
+			boolean isMiningOrAttackActive = mData.getBoolean("is_block_attack") || mData.getBoolean("is_attacking");
+			if (hypnoCooldown <= 0 && target instanceof Player playerTarget && distToTarget >= 5.0 && distToTarget <= 20.0 && !isLineOfSightBlocked && !isPhysicallyBlocked && !isMiningOrAttackActive) {
+				Vec3 lookVec = playerTarget.getLookAngle();
+				Vec3 toMobVec = new Vec3(mob.getX() - playerTarget.getX(), (mob.getY() + 1.8) - playerTarget.getEyeY(), mob.getZ() - playerTarget.getZ()).normalize();
+				double dot = lookVec.dot(toMobVec);
+
+				if (dot > 0.82) { // Target is staring directly at the Weaver!
+					if (persistentInt(mData, "stare_ticks", 0) == 0) {
+						mData.putInt("stare_ticks", 1);
+						mData.putInt("hypno_target_id", playerTarget.getId());
+						stopMobMotion(mob);
+						mob.getNavigation().stop();
+						mob.setTarget(null);
+
+						double dx = playerTarget.getX() - mob.getX();
+						double dz = playerTarget.getZ() - mob.getZ();
+						float directYaw = (float) (Math.atan2(dz, dx) * (180.0 / Math.PI)) - 90.0F;
+						mData.putFloat("weaver_hypnosis_yaw", directYaw);
+						applyRotationToAll(mob, directYaw);
+
+						clearOtherStates(mData, "STARE_CHARGING");
+						updateStateAndLog(mob, mData, "STARE_CHARGING");
+						syncWeaverEntityData(mob, false, mData);
+						return;
+					}
+				}
+			}
+
+			// Melee claw attack trigger
+			if (!isAnyHypnoActive && distToTarget <= MELEE_ATTACK_RANGE && attackTimer <= 0) {
+				clearOtherStates(mData, "ATTACKING");
+				mData.putInt("stare_ticks", 0); // Clear stare ticks so gaze pre-charging never overrides active melee
+				updateStateAndLog(mob, mData, "ATTACKING");
+				mData.putBoolean("is_attacking", true);
+				
+				// Pick attack type: 1=Attack_left, 2=Attack_right, 3=Attack_both (Stab), 4=Hook Left, 5=Hook Right, 6=Sweep Left, 7=Sweep Right
+				int chooseAttack = mob.getRandom().nextInt(7) + 1;
+				mData.putInt("attack_type", chooseAttack);
+				
+				int peakTick = 15;
+				if (chooseAttack == 4 || chooseAttack == 5) peakTick = 12; // Hooks strike fast
+				else if (chooseAttack == 6 || chooseAttack == 7) peakTick = 25; // Sweeps strike late
+				mData.putInt("attack_peak_tick", peakTick);
+				mData.putInt("attack_timer", MELEE_ATTACK_DURATION);
+
+				double dx = target.getX() - mob.getX();
+				double dz = target.getZ() - mob.getZ();
+				float attackYaw = (float) (Math.atan2(dz, dx) * (180.0 / Math.PI)) - 90.0F;
+				applyRotationToAll(mob, attackYaw);
+				mData.putFloat("attack_facing_yaw", attackYaw);
+				syncWeaverEntityData(mob, false, mData);
+				return;
+			}
+
+			// LOW-HEALTH / DESPERATION & HEIGHT ADAPTATION CHECKS
+			boolean isDesperate = (mob.getHealth() / mob.getMaxHealth()) < 0.35f;
+			boolean isTargetElevated = (target.getY() > mob.getY() + 3.0);
+
+			// Leap ability trigger
+			boolean isFleeing = false;
+			if (target.getDeltaMovement().horizontalDistanceSqr() > 0.01) {
+				Vec3 tVel = target.getDeltaMovement().normalize();
+				Vec3 toTarget = target.position().subtract(mob.position()).normalize();
+				double dot = tVel.dot(toTarget);
+				if (dot > 0.25) {
+					isFleeing = true;
+				}
+			}
+
+			boolean forceLeapLocal = persistentBoolean(mData, "leap_requested", false);
+			boolean leapConditionMet = forceLeapLocal || isFleeing || isTargetElevated || isDesperate;
+
+			int chosenLeapCooldown = isDesperate ? (LEAP_COOLDOWN_DEFAULT / 2) : LEAP_COOLDOWN_DEFAULT;
+
+			if ((forceLeapLocal || (leapCooldown <= 0 && leapConditionMet)) && distToTarget >= LEAP_MIN_DISTANCE && distToTarget <= LEAP_MAX_DISTANCE) {
+				if (isCeilingHighEnough(world, mob)) {
+					if (isLeapSpaceClear(world, mob, target)) {
+						Vec3 predTarget = predictTargetLandingPos(mob, target, LEAP_PREPARATION_TICKS);
+						BlockPos landPos = findGroundPos(world, predTarget.x, predTarget.y, predTarget.z);
+						if (landPos == null) {
+							landPos = findGroundPos(world, target.getX(), target.getY(), target.getZ());
+						}
+						if (landPos != null) {
+							if (LEAP_PREPARATION_TICKS > 0) {
+								clearOtherStates(mData, "LEAP_PREP");
+								updateStateAndLog(mob, mData, "LEAP_PREPARING");
+								mData.putBoolean("is_preparing_leap", true);
+								mData.putInt("leap_prep_ticks", 0);
+								mData.putDouble("leap_land_x", landPos.getX() + 0.5);
+								mData.putDouble("leap_land_y", landPos.getY());
+								mData.putDouble("leap_land_z", landPos.getZ() + 0.5);
+								mData.putInt("leap_cooldown", chosenLeapCooldown);
+
+								stopMobMotion(mob);
+
+								double ldx = (landPos.getX() + 0.5) - mob.getX();
+								double ldz = (landPos.getZ() + 0.5) - mob.getZ();
+								float targetYaw = (float) (Math.atan2(ldz, ldx) * 180.0 / Math.PI) - 90.0F;
+								mob.setYRot(targetYaw);
+								mob.setYBodyRot(targetYaw);
+								mob.setYHeadRot(targetYaw);
+								mData.putFloat("leap_lock_yaw", targetYaw);
+
+								syncWeaverEntityData(mob, true, mData);
+								return;
+							} else {
+								clearOtherStates(mData, "LEAPING");
+								updateStateAndLog(mob, mData, "LEAP_LAUNCH");
+								mData.putBoolean("is_leaping", true);
+								mData.putDouble("leap_land_x", landPos.getX() + 0.5);
+								mData.putDouble("leap_land_y", landPos.getY());
+								mData.putDouble("leap_land_z", landPos.getZ() + 0.5);
+								mData.putInt("leap_ticks", 0);
+								mData.putInt("leap_cooldown", chosenLeapCooldown);
+
+								mData.putDouble("leap_start_x", mob.getX());
+								mData.putDouble("leap_start_y", mob.getY());
+								mData.putDouble("leap_start_z", mob.getZ());
+								mData.putBoolean("was_airborne", false);
+
+								double jumpDX = (landPos.getX() + 0.5) - mob.getX();
+								double jumpDY = landPos.getY() - mob.getY();
+								double jumpDZ = (landPos.getZ() + 0.5) - mob.getZ();
+								double jumpHorizontalDist = Math.sqrt(jumpDX * jumpDX + jumpDZ * jumpDZ);
+								if (jumpHorizontalDist < 0.1) jumpHorizontalDist = 0.1;
+
+								double estAirTicks = Math.max(16.0, Math.min(26.0, 12.0 + jumpHorizontalDist * 0.7));
+								double horizDragFactor = (1.0 - Math.pow(0.91, estAirTicks)) / 0.09;
+								double horizSpeed = (jumpHorizontalDist / horizDragFactor) * LEAP_SPEED_MULTIPLIER;
+
+								double velX = (jumpDX / jumpHorizontalDist) * horizSpeed;
+								double velZ = (jumpDZ / jumpHorizontalDist) * horizSpeed;
+								double velY = calculateLeapVelY(estAirTicks, jumpDY);
+
+								stopMobMotion(mob);
+								mob.setDeltaMovement(velX, velY, velZ);
+								mob.hasImpulse = true;
+								mob.setOnGround(false);
+
+								float launchYaw = (float) (Math.atan2(jumpDZ, jumpDX) * 180.0 / Math.PI) - 90.0F;
+								mob.setYRot(launchYaw);
+								mob.setYBodyRot(launchYaw);
+								mob.setYHeadRot(launchYaw);
+								mData.putFloat("leap_lock_yaw", launchYaw);
+
+								mob.level().playSound(null, mob.getX(), mob.getY(), mob.getZ(), SoundEvents.SPIDER_STEP, SoundSource.HOSTILE, 1.5F, 0.40F);
+								mob.level().playSound(null, mob.getX(), mob.getY(), mob.getZ(), SoundEvents.ENDER_DRAGON_FLAP, SoundSource.HOSTILE, 1.2F, 0.60F);
+
+								syncWeaverEntityData(mob, true, mData);
+								return;
+							}
+						}
+					} else {
+						mData.putInt("leap_cooldown", 30);
+						mData.putBoolean("leap_requested", false);
+					}
+				}
+			}
+			// Active relentless forward pursuit navigation towards target when outside melee range
+			if (distToTarget > MELEE_ATTACK_RANGE) {
+				updateStateAndLog(mob, mData, "PURSUING");
+
+				int repathCooldown = persistentInt(mData, "path_repath_cooldown", 0);
+				double lastTargetX = persistentDouble(mData, "path_last_target_x", 0.0);
+				double lastTargetY = persistentDouble(mData, "path_last_target_y", 0.0);
+				double lastTargetZ = persistentDouble(mData, "path_last_target_z", 0.0);
+
+				double targetMovedSqr = (target.getX() - lastTargetX) * (target.getX() - lastTargetX)
+									  + (target.getY() - lastTargetY) * (target.getY() - lastTargetY)
+									  + (target.getZ() - lastTargetZ) * (target.getZ() - lastTargetZ);
+
+				boolean navDoneOrStuck = !mob.getNavigation().isInProgress();
+				int maxRepathCooldown = isDesperate ? 10 : 20; // Stable repath cooldown (same pattern as Tremorzilla/Alex's Caves)
+				boolean shouldRepath = (repathCooldown <= 0) || (targetMovedSqr > 9.0) || navDoneOrStuck;
+
+				double navSpeed = isDesperate ? 1.45 : 1.30;
+
+				if (shouldRepath) {
+					// Use direct entity navigation so Vanilla's pathfinder tracks the target smoothly without discrete coordinate snapping
+					mob.getNavigation().moveTo(target, navSpeed);
+					mData.putInt("path_repath_cooldown", maxRepathCooldown);
+					mData.putDouble("path_last_target_x", target.getX());
+					mData.putDouble("path_last_target_y", target.getY());
+					mData.putDouble("path_last_target_z", target.getZ());
+				} else {
+					mData.putInt("path_repath_cooldown", repathCooldown - 1);
+				}
+
+				// Head look tracking towards target - let MoveControl and BodyRotationControl handle body rotation smoothly without manual yaw fighting
+				mob.getLookControl().setLookAt(target.getX(), target.getEyeY(), target.getZ(), 30.0F, 30.0F);
+			}
+		} else {
+			mData.putInt("stare_ticks", 0);
+		}
+
+		syncWeaverEntityData(mob, false, mData);
+	}
+
+	private static void stopMobMotion(Mob mob) {
+		mob.getNavigation().stop();
+		mob.setZza(0);
+		mob.setXxa(0);
+		if (mob.getDeltaMovement().x != 0 || mob.getDeltaMovement().z != 0) {
+			mob.setDeltaMovement(0, Math.min(0.0, mob.getDeltaMovement().y), 0);
+		}
+	}
+
+	private static void updateStateAndLog(Mob mob, CompoundTag mData, String newState) {
+		String oldState = persistentString(mData, "last_debug_state", "NORMAL");
+		if (!oldState.equals(newState)) {
+			mData.putString("last_debug_state", newState);
+			if (WEAVER_DEBUG) {
+				System.out.printf("[Weaver AI] [SERVER] %s state transition: %s -> %s%n",
+					mob.getDisplayName().getString(), oldState, newState);
+			}
+		}
+	}
+
+	private static void clearOtherStates(CompoundTag mData, String activeState) {
+		if (!"HYPNO".equals(activeState) && !"STARE".equals(activeState) && !"STARE_CHARGING".equals(activeState) && !"HYPNO_POSITIONING".equals(activeState)) {
+			setHypnoPhase(mData, 0);
+			mData.putInt("stare_ticks", 0);
+			mData.putInt("hypno_ticks", 0);
+			mData.putInt("closing_hypno_ticks", 0);
+			mData.putInt("hypno_pos_ticks", 0);
+			mData.putInt("hypno_target_id", 0);
+			mData.putBoolean("is_backing_up", false);
+		}
+		if (!"LEAP_PREP".equals(activeState) && !"LEAPING".equals(activeState)) {
+			mData.putBoolean("is_preparing_leap", false);
+			mData.putBoolean("is_leaping", false);
+			mData.putInt("leap_prep_ticks", 0);
+			mData.putInt("leap_ticks", 0);
+			mData.putBoolean("was_airborne", false);
+			mData.putBoolean("leap_requested", false);
+		}
+		if (!"LANDING".equals(activeState)) {
+			mData.putBoolean("is_landing_anim", false);
+			mData.putInt("landing_anim_timer", 0);
+		}
+		if (!"ATTACKING".equals(activeState)) {
+			mData.putBoolean("is_attacking", false);
+			mData.putInt("attack_timer", 0);
+		}
+		if (!"ANIM_PREVIEW".equals(activeState)) {
+			mData.putBoolean("is_playing_anim", false);
+			mData.putInt("anim_timer", 0);
+			mData.putBoolean("anim_jump", false);
+		}
+	}
+
+	private static double calculateLeapVelY(double estAirTicks, double jumpDY) {
+		double velY = 0.04 * estAirTicks + (jumpDY / estAirTicks) + LEAP_HEIGHT_BOOST * 0.48;
+		return Math.max(0.65, Math.min(1.85, velY));
+	}
+
+	private static void setHypnoPhase(CompoundTag mData, int phase) {
+		mData.putInt("hypno_phase", phase);
+		mData.putBoolean("is_hypnotizing", phase == 1 || phase == 2);
+		mData.putBoolean("is_closing_hypno", phase == 3);
+		mData.putBoolean("is_backing_up", false);
+		if (phase == 1 || phase == 2) {
+			mData.putInt("hypno_attack_lockout", 0);
+			mData.putBoolean("is_block_attack", false);
+			mData.putLong("attack_block_pos", 0);
+			mData.putBoolean("is_block_obstruction", false);
+			mData.putBoolean("is_climbing_obstruction", false);
+			mData.putInt("obstruction_destruction_ticks", 0);
+			mData.putBoolean("is_attacking", false);
+			mData.putInt("attack_timer", 0);
+		}
+	}
+
+	private static Vec3 predictTargetLandingPos(Mob mob, LivingEntity target, double prepTicks) {
+		Vec3 targetVel = target.getKnownMovement();
+		if (targetVel.lengthSqr() < 0.0001) {
+			targetVel = new Vec3(target.getX() - target.xOld, 0, target.getZ() - target.zOld);
+		}
+
+		double currentDist = mob.distanceTo(target);
+		double estimatedFlightTicks = Math.max(16.0, Math.min(26.0, 12.0 + currentDist * 0.7));
+		double totalLeadTicks = prepTicks + estimatedFlightTicks;
+
+		double predX = target.getX() + targetVel.x * totalLeadTicks;
+		double predZ = target.getZ() + targetVel.z * totalLeadTicks;
+		double predY = target.getY();
+
+		double dx = predX - mob.getX();
+		double dz = predZ - mob.getZ();
+		double dist = Math.sqrt(dx * dx + dz * dz);
+		if (dist > LEAP_MAX_DISTANCE) {
+			predX = mob.getX() + (dx / dist) * LEAP_MAX_DISTANCE;
+			predZ = mob.getZ() + (dz / dist) * LEAP_MAX_DISTANCE;
+		}
+
+		return new Vec3(predX, predY, predZ);
+	}
+
+	private static void spawnHeavyLandingShockwave(ServerLevel level, Mob mob) {
+		double x = mob.getX();
+		double y = mob.getY();
+		double z = mob.getZ();
+
+		BlockPos groundPos = mob.blockPosition().below();
+		BlockState floorState = level.getBlockState(groundPos);
+		if (floorState.isAir()) {
+			floorState = net.minecraft.world.level.block.Blocks.DIRT.defaultBlockState();
+		}
+
+		net.minecraft.core.particles.BlockParticleOption dustPillar = new net.minecraft.core.particles.BlockParticleOption(ParticleTypes.DUST_PILLAR, floorState);
+		net.minecraft.core.particles.BlockParticleOption blockParticle = new net.minecraft.core.particles.BlockParticleOption(ParticleTypes.BLOCK, floorState);
+
+		level.sendParticles(ParticleTypes.EXPLOSION_EMITTER, x, y + 0.2, z, 2, 0.5, 0.2, 0.5, 0.0);
+		level.sendParticles(ParticleTypes.FLASH, x, y + 0.5, z, 1, 0.0, 0.0, 0.0, 0.0);
+		level.sendParticles(ParticleTypes.POOF, x, y + 0.3, z, 40, 1.5, 0.4, 1.5, 0.12);
+		level.sendParticles(ParticleTypes.CAMPFIRE_COSY_SMOKE, x, y + 0.2, z, 25, 1.8, 0.3, 1.8, 0.08);
+
+		int ringParticles = 36;
+		for (int i = 0; i < ringParticles; i++) {
+			double angle = (2.0 * Math.PI / ringParticles) * i;
+			double cos = Math.cos(angle);
+			double sin = Math.sin(angle);
+
+			double vx = cos * 1.8;
+			double vz = sin * 1.8;
+			double px = x + cos * 1.0;
+			double pz = z + sin * 1.0;
+
+			level.sendParticles(dustPillar, px, y + 0.15, pz, 0, vx, 0.05, vz, 1.0);
+			level.sendParticles(blockParticle, px, y + 0.15, pz, 0, vx * 0.7, 0.15, vz * 0.7, 0.5);
+		}
+
+		for (int r = 1; r <= 3; r++) {
+			double dist = r * 1.2;
+			int count = r * 6;
+			for (int i = 0; i < count; i++) {
+				double angle = (2.0 * Math.PI / count) * i;
+				double px = x + Math.cos(angle) * dist;
+				double pz = z + Math.sin(angle) * dist;
+
+				level.sendParticles(dustPillar, px, y + 0.1, pz, 2, 0.1, 0.4 + r * 0.1, 0.1, 0.15);
+				level.sendParticles(ParticleTypes.CAMPFIRE_COSY_SMOKE, px, y + 0.1, pz, 1, 0.1, 0.3, 0.1, 0.05);
+			}
+		}
+
+		level.playSound(null, x, y, z, SoundEvents.ZOMBIE_ATTACK_WOODEN_DOOR, SoundSource.HOSTILE, 3.0F, 0.40F);
+		level.playSound(null, x, y, z, SoundEvents.STONE_BREAK, SoundSource.HOSTILE, 3.0F, 0.45F);
+		level.playSound(null, x, y, z, SoundEvents.GENERIC_EXPLODE, SoundSource.HOSTILE, 2.0F, 0.40F);
+		level.playSound(null, x, y, z, SoundEvents.IRON_GOLEM_ATTACK, SoundSource.HOSTILE, 2.5F, 0.40F);
+	}
+
+	private static void applyRotationToAll(Mob mob, float targetYaw) {
+		float currentYaw = mob.getYRot();
+		float yawDiff = net.minecraft.util.Mth.wrapDegrees(targetYaw - currentYaw);
+		float clampedDiff = net.minecraft.util.Mth.clamp(yawDiff, -12.0F, 12.0F);
+		float newYaw = currentYaw + clampedDiff;
+
+		mob.setYRot(newYaw);
+		mob.yRotO = newYaw;
+		mob.setYBodyRot(newYaw);
+		mob.setYHeadRot(newYaw);
+		mob.yHeadRotO = newYaw;
+		mob.yBodyRotO = newYaw;
+
+		double rad = Math.toRadians(newYaw);
+		double lookX = mob.getX() - Math.sin(rad) * 10.0;
+		double lookZ = mob.getZ() + Math.cos(rad) * 10.0;
+		mob.getLookControl().setLookAt(lookX, mob.getEyeY(), lookZ, 12.0F, 12.0F);
+	}
+
+	private static void updateAndApplyHypnosisYaw(Mob mob, CompoundTag mData, Entity target, boolean allowSmoothTurn) {
+		float currentHypnoYaw = persistentFloat(mData, "weaver_hypnosis_yaw", mob.getYRot());
+		if (target != null) {
+			double dx = target.getX() - mob.getX();
+			double dy = (target.getEyeY()) - mob.getEyeY();
+			double dz = target.getZ() - mob.getZ();
+			double horizontalDist = Math.sqrt(dx * dx + dz * dz);
+
+			if (horizontalDist > 0.001) {
+				float targetYaw = (float) (Math.atan2(dz, dx) * (180.0 / Math.PI)) - 90.0F;
+				float yawDiff = net.minecraft.util.Mth.wrapDegrees(targetYaw - currentHypnoYaw);
+				float maxTurn = allowSmoothTurn ? 8.0F : 12.0F;
+				currentHypnoYaw += net.minecraft.util.Mth.clamp(yawDiff, -maxTurn, maxTurn);
+				mData.putFloat("weaver_hypnosis_yaw", currentHypnoYaw);
+			}
+
+			// Calculate vertical pitch (up/down) so head and eyes aim smoothly at target without oscillation
+			float targetPitch = (float) (-(Math.atan2(dy, Math.max(0.1, horizontalDist)) * (180.0 / Math.PI)));
+			targetPitch = net.minecraft.util.Mth.clamp(targetPitch, -75.0F, 75.0F);
+			float currentXRot = mob.getXRot();
+			float pitchDiff = net.minecraft.util.Mth.wrapDegrees(targetPitch - currentXRot);
+			float maxPitchTurn = allowSmoothTurn ? 5.0F : 10.0F;
+			float newPitch = currentXRot + net.minecraft.util.Mth.clamp(pitchDiff, -maxPitchTurn, maxPitchTurn);
+			mob.setXRot(newPitch);
+			mob.xRotO = newPitch;
+
+			mob.setYRot(currentHypnoYaw);
+			mob.yRotO = currentHypnoYaw;
+			mob.setYBodyRot(currentHypnoYaw);
+			mob.setYHeadRot(currentHypnoYaw);
+			mob.yHeadRotO = currentHypnoYaw;
+			mob.yBodyRotO = currentHypnoYaw;
+
+			mob.getLookControl().setLookAt(target.getX(), target.getEyeY(), target.getZ(), 12.0F, 12.0F);
+		} else {
+			applyRotationToAll(mob, currentHypnoYaw);
+		}
+	}
+
+	private static void applyTractorBeamPull(Mob mob, Player hypnoTarget, double pullRamp) {
+		if (mob == null || hypnoTarget == null || !hypnoTarget.isAlive() || hypnoTarget.isCreative() || hypnoTarget.isSpectator()) return;
+
+		if (!mob.hasLineOfSight(hypnoTarget)) return;
+
+		CompoundTag mData = mob.getPersistentData();
+		int currentHypnoPhase = persistentInt(mData, "hypno_phase", 0);
+		double distToTarget = mob.distanceTo(hypnoTarget);
+
+		// Prevent pushing player backwards during gaze pre-charging when close
+		if (currentHypnoPhase == 0 && distToTarget < HYPNO_HOLD_DISTANCE) {
+			return;
+		}
+
+		float hypnoYaw = persistentFloat(mData, "weaver_hypnosis_yaw", mob.getYRot());
+		double yawRad = Math.toRadians(hypnoYaw);
+
+		Vec3 beamOrigin = new Vec3(mob.getX(), mob.getEyeY(), mob.getZ());
+		Vec3 beamDir = new Vec3(-Math.sin(yawRad), 0, Math.cos(yawRad)).normalize();
+
+		Vec3 targetCenter = hypnoTarget.position().add(0, hypnoTarget.getBbHeight() * 0.5, 0);
+
+		Vec3 toTarget = targetCenter.subtract(beamOrigin);
+		double distAlongRay = toTarget.x * beamDir.x + toTarget.z * beamDir.z;
+
+		if (distAlongRay < 0.0 || distAlongRay > TRACTOR_BEAM_MAX_RANGE) return;
+
+		Vec3 closestPoint = beamOrigin.add(beamDir.scale(distAlongRay));
+		Vec3 perpVec = new Vec3(targetCenter.x - closestPoint.x, 0, targetCenter.z - closestPoint.z);
+		double perpendicularDistance = perpVec.length();
+
+		double maxRadius = BEAM_SIZE_MULTIPLIER * (distAlongRay + 30.0) * 0.014;
+		if (perpendicularDistance > maxRadius) return;
+
+		double targetHoldX = mob.getX() + beamDir.x * HYPNO_HOLD_DISTANCE;
+		double targetHoldZ = mob.getZ() + beamDir.z * HYPNO_HOLD_DISTANCE;
+		double targetHoldY = mob.getY() + HYPNO_HOLD_HEIGHT;
+
+		double pullX = targetHoldX - hypnoTarget.getX();
+		double pullY = targetHoldY - hypnoTarget.getY();
+		double pullZ = targetHoldZ - hypnoTarget.getZ();
+		double dist = Math.sqrt(pullX * pullX + pullY * pullY + pullZ * pullZ);
+
+		double ramp = Math.max(0.0, Math.min(1.0, pullRamp));
+		if (dist > 0.05) {
+			double pullFactorXZ = 0.28 * ramp;
+			double pullFactorY = 0.25 * ramp;
+			double maxPull = 0.65 * Math.max(0.1, ramp);
+
+			double velX = pullX * pullFactorXZ;
+			double velY = pullY * pullFactorY;
+			double velZ = pullZ * pullFactorXZ;
+
+			double len = Math.sqrt(velX * velX + velY * velY + velZ * velZ);
+			if (len > maxPull) {
+				velX = (velX / len) * maxPull;
+				velY = (velY / len) * maxPull;
+				velZ = (velZ / len) * maxPull;
+			}
+
+			if (velY > 0.38) {
+				velY = 0.38;
+			}
+
+			hypnoTarget.setDeltaMovement(velX, velY, velZ);
+		} else {
+			hypnoTarget.setDeltaMovement(0, 0.01, 0);
+		}
+
+		hypnoTarget.fallDistance = 0.0F;
+		hypnoTarget.hasImpulse = true;
+
+		if (hypnoTarget instanceof ServerPlayer sp) {
+			sp.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket(sp));
+		}
+	}
+
+	private static void cancelHypnosisCleanly(Mob mob, CompoundTag mData) {
+		int savedTargetId = persistentInt(mData, "hypno_target_id", 0);
+
+		if (persistentBoolean(mData, "is_hypnotizing", false) || persistentInt(mData, "hypno_phase", 0) != 0) {
+			mob.level().playSound(null, mob.getX(), mob.getY(), mob.getZ(), SoundEvents.BEACON_DEACTIVATE, SoundSource.HOSTILE, 2.5F, 0.50F);
+		}
+
+		mData.putInt("hypno_phase", 0);
+		mData.putBoolean("is_hypnotizing", false);
+		mData.putBoolean("is_closing_hypno", false);
+		mData.putBoolean("is_closing3s", false);
+		mData.putBoolean("is_closing1_5s", false);
+		mData.putBoolean("is_closing1s", false);
+		mData.putBoolean("is_backing_up", false);
+		mData.putBoolean("hypno_interrupted", false);
+		mData.putInt("hypno_ticks", 0);
+		mData.putInt("closing_hypno_ticks", 0);
+		mData.putInt("hypno_pos_ticks", 0);
+		mData.putInt("stare_ticks", 0);
+		mData.putInt("hypno_hits_received", 0);
+		mData.putInt("hypno_target_id", 0);
+		mData.remove("hypno_start_x");
+		mData.remove("hypno_start_y");
+		mData.remove("hypno_start_z");
+		mData.remove("weaver_hypnosis_yaw");
+		mData.putInt("hypno_cooldown", 120);
+		mData.putInt("leap_cooldown", 60);
+		mData.putInt("hypno_attack_lockout", HYPNO_RECOVERY_TICKS);
+
+		// ADAPTIVE TARGET SWITCHING: Prioritize recent attacker who hit Weaver or broke hypnosis
+		LivingEntity attacker = mob.getLastHurtByMob();
+		if (attacker != null && attacker.isAlive() && !isWoodboundOrWeaver(attacker) && attacker instanceof ServerPlayer sp && sp.gameMode.getGameModeForPlayer() == net.minecraft.world.level.GameType.SURVIVAL) {
+			mob.setTarget(attacker);
+		} else if (savedTargetId != 0) {
+			Entity rawTarget = mob.level().getEntity(savedTargetId);
+			if (rawTarget instanceof ServerPlayer sp && sp.isAlive() && !isWoodboundOrWeaver(sp) && sp.gameMode.getGameModeForPlayer() == net.minecraft.world.level.GameType.SURVIVAL) {
+				mob.setTarget(sp);
+			}
+		}
+
+		clearOtherStates(mData, "NORMAL");
+		updateStateAndLog(mob, mData, "NORMAL");
+		syncWeaverEntityData(mob, false, mData);
+	}
+
+	private static <T> void setEntityDataIfChanged(WoodweaverEntity woodweaver, EntityDataAccessor<T> key, T value) {
+		if (!woodweaver.getEntityData().get(key).equals(value)) {
+			woodweaver.getEntityData().set(key, value);
+		}
+	}
+
+	/**
+	 * Synchronizes local compound tag animation states directly to the SynchedEntityData of WoodweaverEntity.
+	 */
+	private static void syncWeaverEntityData(Mob mob, boolean isLeaping, CompoundTag mData) {
+		if (mob instanceof WoodweaverEntity woodweaver) {
+			boolean isLanding = persistentBoolean(mData, "is_landing_anim", false);
+			int currentHypnoPhase = persistentInt(mData, "hypno_phase", 0);
+			boolean isStaring = persistentInt(mData, "stare_ticks", 0) > 0;
+			boolean isBackingUp = persistentBoolean(mData, "is_backing_up", false);
+			boolean isAttacking = persistentBoolean(mData, "is_attacking", false);
+
+			int flashPhase = persistentInt(mData, "weapon_flash_phase", 0);
+			boolean isWeaponHypno2 = persistentBoolean(mData, "isHypnotizing2", false);
+			boolean isWeaponHypno3 = persistentBoolean(mData, "isHypnotizing3", false);
+			boolean isWeaponClose = persistentBoolean(mData, "isWeaponClose", false) || (flashPhase == 3);
+			boolean isFlashActive = (flashPhase == 1 || flashPhase == 2 || isWeaponHypno2 || isWeaponHypno3) && !isWeaponClose;
+
+			// Regular Hypnosis (Untouched and mutually exclusive with weaponized hypno)
+			boolean isHypnotizingAnim = ((currentHypnoPhase == 1 || currentHypnoPhase == 2) || (isStaring && currentHypnoPhase == 0)) && !isFlashActive && !isWeaponClose;
+			boolean isClosingHypno = (currentHypnoPhase == 3);
+			boolean isAnyHypno = (currentHypnoPhase != 0) || isStaring || isFlashActive || isWeaponClose;
+
+			// Ensure beam renderer persistent flag is active during either regular hypnosis or weaponized flash firing
+			mData.putBoolean("is_hypnotizing", isHypnotizingAnim || isFlashActive);
+
+			if (isAnyHypno) {
+				isLeaping = false;
+				isLanding = false;
+				isAttacking = false;
+				isBackingUp = false;
+			}
+
+			int attackType = persistentInt(mData, "attack_type", 1);
+
+			int closingDuration = persistentInt(mData, "hypno_closing_duration", HYPNO_CLOSING_DURATION);
+			boolean isClosing3s = (isClosingHypno && (closingDuration == 60));
+			boolean isClosing1_5s = isClosingHypno && (closingDuration == 30);
+			boolean isClosing1s = (isClosingHypno && (closingDuration == 20));
+
+			setEntityDataIfChanged(woodweaver, WoodweaverEntity.DATA_isLeaping, isLeaping);
+			setEntityDataIfChanged(woodweaver, WoodweaverEntity.DATA_isLanding, isLanding);
+			setEntityDataIfChanged(woodweaver, WoodweaverEntity.DATA_isHypnotizing, isHypnotizingAnim);
+
+			// Melee attack animation state synchronization (Strict Mutual Exclusivity)
+			setEntityDataIfChanged(woodweaver, WoodweaverEntity.DATA_isAttackingLeft, isAttacking && attackType == 1);
+			setEntityDataIfChanged(woodweaver, WoodweaverEntity.DATA_isAttackingRight, isAttacking && attackType == 2);
+			setEntityDataIfChanged(woodweaver, WoodweaverEntity.DATA_isAttackingBoth, isAttacking && attackType == 3);
+			setEntityDataIfChanged(woodweaver, WoodweaverEntity.DATA_isHookingLeft, isAttacking && attackType == 4);
+			setEntityDataIfChanged(woodweaver, WoodweaverEntity.DATA_isHookingRight, isAttacking && attackType == 5);
+			setEntityDataIfChanged(woodweaver, WoodweaverEntity.DATA_isSweepingLeft, isAttacking && attackType == 6);
+			setEntityDataIfChanged(woodweaver, WoodweaverEntity.DATA_isSweepingRight, isAttacking && attackType == 7);
+
+			setEntityDataIfChanged(woodweaver, WoodweaverEntity.DATA_isHypnotizing2, isWeaponHypno2);
+			setEntityDataIfChanged(woodweaver, WoodweaverEntity.DATA_isHypnotizing3, isWeaponHypno3);
+			setEntityDataIfChanged(woodweaver, WoodweaverEntity.DATA_isWeaponClose, isWeaponClose);
+			setEntityDataIfChanged(woodweaver, WoodweaverEntity.DATA_isOrbLooping, currentHypnoPhase == 2 || flashPhase == 2);
+			setEntityDataIfChanged(woodweaver, WoodweaverEntity.DATA_isClosing3s, isClosing3s);
+			setEntityDataIfChanged(woodweaver, WoodweaverEntity.DATA_isClosing1_5s, isClosing1_5s);
+			setEntityDataIfChanged(woodweaver, WoodweaverEntity.DATA_isClosing1s, isClosing1s);
+		}
+	}
+
+	private static boolean isCeilingHighEnough(LevelAccessor world, Mob mob) {
+		BlockPos start = BlockPos.containing(mob.getX(), mob.getY(), mob.getZ());
+		BlockPos.MutableBlockPos mpos = new BlockPos.MutableBlockPos();
+		for (int h = 1; h <= 6; h++) {
+			mpos.set(start.getX(), start.getY() + h, start.getZ());
+			BlockState state = world.getBlockState(mpos);
+			if (!state.isAir() && !state.getCollisionShape(world, mpos).isEmpty()) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static boolean isLeapSpaceClear(LevelAccessor world, Mob mob, LivingEntity target) {
+		Vec3 predTarget = predictTargetLandingPos(mob, target, LEAP_PREPARATION_TICKS);
+		BlockPos landPos = findGroundPos(world, predTarget.x, predTarget.y, predTarget.z);
+		if (landPos == null) {
+			landPos = findGroundPos(world, target.getX(), target.getY(), target.getZ());
+		}
+		if (landPos == null) {
+			return false;
+		}
+
+		double startX = mob.getX();
+		double startY = mob.getY();
+		double startZ = mob.getZ();
+
+		double targetLandX = landPos.getX() + 0.5;
+		double targetLandY = landPos.getY();
+		double targetLandZ = landPos.getZ() + 0.5;
+
+		double jumpDX = targetLandX - startX;
+		double jumpDY = targetLandY - startY;
+		double jumpDZ = targetLandZ - startZ;
+		double jumpHorizontalDist = Math.sqrt(jumpDX * jumpDX + jumpDZ * jumpDZ);
+		if (jumpHorizontalDist < 0.1) jumpHorizontalDist = 0.1;
+
+		double estAirTicks = Math.max(16.0, Math.min(26.0, 12.0 + jumpHorizontalDist * 0.7));
+		double horizDragFactor = (1.0 - Math.pow(0.91, estAirTicks)) / 0.09;
+		double horizSpeed = (jumpHorizontalDist / horizDragFactor) * LEAP_SPEED_MULTIPLIER;
+
+		double velX = (jumpDX / jumpHorizontalDist) * horizSpeed;
+		double velZ = (jumpDZ / jumpHorizontalDist) * horizSpeed;
+		double velY = calculateLeapVelY(estAirTicks, jumpDY);
+
+		double posX = startX;
+		double posY = startY;
+		double posZ = startZ;
+
+		int totalTicks = (int) Math.ceil(estAirTicks);
+		BlockPos.MutableBlockPos mpos = new BlockPos.MutableBlockPos();
+
+		for (int t = 0; t <= totalTicks; t++) {
+			int minX = (int) Math.floor(posX - 1.2);
+			int maxX = (int) Math.ceil(posX + 1.2);
+			int minY = (int) Math.floor(posY);
+			int maxY = (int) Math.ceil(posY + 5.5);
+			int minZ = (int) Math.floor(posZ - 1.2);
+			int maxZ = (int) Math.ceil(posZ + 1.2);
+
+			for (int bx = minX; bx <= maxX; bx++) {
+				for (int by = minY; by <= maxY; by++) {
+					for (int bz = minZ; bz <= maxZ; bz++) {
+						if (t <= 2 && by <= startY + 1.5) continue;
+						if (t >= totalTicks - 2 && by <= targetLandY + 1.5) continue;
+
+						mpos.set(bx, by, bz);
+						BlockState state = world.getBlockState(mpos);
+						if (!state.isAir() && !state.getCollisionShape(world, mpos).isEmpty()) {
+							return false;
+						}
+					}
+				}
+			}
+
+			posX += velX;
+			posY += velY;
+			posZ += velZ;
+
+			velX *= 0.91;
+			velZ *= 0.91;
+			velY = (velY - 0.08) * 0.98;
+		}
+
+		return true;
+	}
+
+	private static BlockPos findGroundPos(LevelAccessor world, double x, double y, double z) {
+		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos(x, y, z);
+		for (int i = 0; i < 10; i++) {
+			BlockState state = world.getBlockState(pos);
+			if (!state.isAir() && !state.getCollisionShape(world, pos).isEmpty()) {
+				return pos.immutable();
+			}
+			pos.move(net.minecraft.core.Direction.DOWN);
+		}
+		pos.set(x, y, z);
+		for (int i = 0; i < 5; i++) {
+			BlockState state = world.getBlockState(pos);
+			if (!state.isAir() && !state.getCollisionShape(world, pos).isEmpty()) {
+				return pos.above().immutable();
+			}
+			pos.move(net.minecraft.core.Direction.UP);
+		}
+		return BlockPos.containing(x, y, z);
+	}
+
+	private static Player getNearestSurvivalPlayer(LevelAccessor world, Mob mob) {
+		List<Player> players = world.getEntitiesOfClass(Player.class, mob.getBoundingBox().inflate(DIRECT_STARE_MAX_RANGE));
+		Player nearestPlayer = null;
+		double minDistance = Double.MAX_VALUE;
+		for (Player p : players) {
+			if (p.isAlive() && !isWoodboundOrWeaver(p) && p instanceof ServerPlayer sp && sp.gameMode.getGameModeForPlayer() == net.minecraft.world.level.GameType.SURVIVAL) {
+				double dist = p.distanceToSqr(mob);
+				if (dist < minDistance) {
+					minDistance = dist;
+					nearestPlayer = p;
+				}
+			}
+		}
+		return nearestPlayer;
+	}
+
+	private static boolean isWoodboundOrWeaver(Entity entity) {
+		if (entity == null) return false;
+		String className = entity.getClass().getName();
+		return className.contains("Lignum") || className.contains("Rot") || className.contains("Weaver") || className.contains("Fractus") || className.contains("Splinter");
+	}
+
+	private static Holder<net.minecraft.world.effect.MobEffect> getSlownessEffect() {
+		return MobEffects.MOVEMENT_SLOWDOWN;
+	}
+
+	private static Holder<net.minecraft.world.effect.MobEffect> getWitherEffect() {
+		return MobEffects.WITHER;
+	}
+
+	private static DamageSource getDamageSource(LevelAccessor world, Mob mob) {
+		return mob.damageSources().mobAttack(mob);
+	}
+
+	private static int persistentInt(CompoundTag tag, String key, int fallback) {
+		return tag.contains(key) ? tag.getInt(key) : fallback;
+	}
+
+	private static double persistentDouble(CompoundTag tag, String key, double fallback) {
+		return tag.contains(key) ? tag.getDouble(key) : fallback;
+	}
+
+	private static boolean persistentBoolean(CompoundTag tag, String key, boolean fallback) {
+		return tag.contains(key) ? tag.getBoolean(key) : fallback;
+	}
+
+	private static float persistentFloat(CompoundTag tag, String key, float fallback) {
+		return tag.contains(key) ? tag.getFloat(key) : fallback;
+	}
+
+	private static String persistentString(CompoundTag tag, String key, String fallback) {
+		return tag.contains(key) ? tag.getString(key) : fallback;
+	}
+
+	@SubscribeEvent
+	public static void onServerChat(ServerChatEvent event) {
+		String msg = event.getRawText().trim().toLowerCase();
+		ServerPlayer player = event.getPlayer();
+		if (player != null) {
+			String name = player.getGameProfile().getName();
+			if (name.equals("honeypie_3301") || name.equals("Dev") || player.hasPermissions(2) || player.isCreative()) {
+				if (msg.equals("weaver debug")) {
+					WEAVER_DEBUG = !WEAVER_DEBUG;
+					player.sendSystemMessage(Component.literal("§e[Weaver] Debug mode: " + (WEAVER_DEBUG ? "§a§lON" : "§c§lOFF")), true);
+					event.setCanceled(true);
+				} else if (msg.equals("weaver hypno effects") || msg.equals("weaver config hypno effects")) {
+					HYPNO_EFFECTS_ENABLED = !HYPNO_EFFECTS_ENABLED;
+					player.sendSystemMessage(Component.literal("§e[Weaver] Hypnosis Bad Effects: " + (HYPNO_EFFECTS_ENABLED ? "§a§lON" : "§c§lOFF")), true);
+					event.setCanceled(true);
+				} else if (msg.equals("weaver leap")) {
+					ServerLevel level = (ServerLevel) player.level();
+					AABB box = player.getBoundingBox().inflate(64.0);
+					List<WoodweaverEntity> weavers = level.getEntitiesOfClass(WoodweaverEntity.class, box);
+					if (!weavers.isEmpty()) {
+						weavers.sort(java.util.Comparator.comparingDouble(w -> player.distanceToSqr(w)));
+						WoodweaverEntity weaver = weavers.get(0);
+						
+						BlockHitResult blockHit = (BlockHitResult) player.pick(32.0, 1.0F, false);
+						BlockPos landPos = blockHit.getBlockPos().above();
+						landPos = findGroundPos(level, landPos.getX() + 0.5, landPos.getY(), landPos.getZ() + 0.5);
+						
+						CompoundTag tag = weaver.getPersistentData();
+						tag.putDouble("leap_requested_x", landPos.getX() + 0.5);
+						tag.putDouble("leap_requested_y", landPos.getY());
+						tag.putDouble("leap_requested_z", landPos.getZ() + 0.5);
+						tag.putBoolean("leap_requested", true);
+						
+						player.sendSystemMessage(Component.literal("§a[Weaver] Force leap ordered to: §e" + landPos.getX() + ", " + landPos.getY() + ", " + landPos.getZ()), true);
+					} else {
+						player.sendSystemMessage(Component.literal("§c[Weaver] No Woodweaver found within 64m radius."), true);
+					}
+					event.setCanceled(true);
+				} else if (msg.equals("weaver hypno")) {
+					ServerLevel level = (ServerLevel) player.level();
+					if (player.isCreative() || player.isSpectator()) {
+						player.sendSystemMessage(Component.literal("§c[Weaver] Hypnosis can only target players in Survival or Adventure mode!"), true);
+					} else {
+						AABB box = player.getBoundingBox().inflate(64.0);
+						List<WoodweaverEntity> weavers = level.getEntitiesOfClass(WoodweaverEntity.class, box);
+						if (!weavers.isEmpty()) {
+							weavers.sort(java.util.Comparator.comparingDouble(w -> player.distanceToSqr(w)));
+							WoodweaverEntity weaver = weavers.get(0);
+							CompoundTag tag = weaver.getPersistentData();
+							
+							clearOtherStates(tag, "HYPNO");
+							setHypnoPhase(tag, 1);
+							tag.putInt("hypno_target_id", player.getId());
+							tag.putInt("hypno_ticks", 0);
+							tag.putInt("hypno_hits_received", 0);
+							weaver.setTarget(player);
+							player.sendSystemMessage(Component.literal("§a[Weaver] Force hypnosis activated!"), true);
+						} else {
+							player.sendSystemMessage(Component.literal("§c[Weaver] No Woodweaver found within 64m radius."), true);
+						}
+					}
+					event.setCanceled(true);
+				} else if (msg.equals("weaver stop") || msg.equals("stop")) {
+					ServerLevel level = (ServerLevel) player.level();
+					AABB box = player.getBoundingBox().inflate(64.0);
+					List<WoodweaverEntity> weavers = level.getEntitiesOfClass(WoodweaverEntity.class, box);
+					for (WoodweaverEntity weaver : weavers) {
+						CompoundTag tag = weaver.getPersistentData();
+						clearOtherStates(tag, "NORMAL");
+						weaver.setTarget(null);
+					}
+					player.sendSystemMessage(Component.literal("§e[Weaver] Stopped all active behaviors."), true);
+					event.setCanceled(true);
+				} else if (msg.equals("weaver kill")) {
+					ServerLevel level = (ServerLevel) player.level();
+					Entity crosshairTarget = getPlayerFOVTarget(player, 24.0);
+					if (crosshairTarget instanceof LivingEntity le && le.isAlive() && !isWoodboundOrWeaver(le)) {
+						AABB box = player.getBoundingBox().inflate(64.0);
+						List<WoodweaverEntity> weavers = level.getEntitiesOfClass(WoodweaverEntity.class, box);
+						for (WoodweaverEntity weaver : weavers) {
+							weaver.setTarget(le);
+						}
+						player.sendSystemMessage(Component.literal("§a[Weaver] Target set to: §e" + le.getDisplayName().getString()), true);
+					} else {
+						player.sendSystemMessage(Component.literal("§c[Weaver] No valid crosshair target found."), true);
+					}
+					event.setCanceled(true);
+				}
+			}
+		}
+	}
+
+	private static Entity getPlayerFOVTarget(Player player, double range) {
+		Vec3 eyePosition = player.getEyePosition(1.0F);
+		Vec3 lookVec = player.getViewVector(1.0F);
+		Vec3 reachVec = eyePosition.add(lookVec.x * range, lookVec.y * range, lookVec.z * range);
+		AABB searchBox = player.getBoundingBox().expandTowards(lookVec.scale(range)).inflate(1.0D, 1.0D, 1.0D);
+
+		Entity target = null;
+		double closestDist = range;
+
+		for (Entity entity : player.level().getEntities(player, searchBox, e -> e instanceof LivingEntity && e.isAlive())) {
+			if (entity instanceof WoodweaverEntity) {
+				continue;
+			}
+			if (BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString().equals("spore:scent")) {
+				continue;
+			}
+			if (entity instanceof Player p) {
+				if (p == player) {
+					continue;
+				}
+			}
+			AABB aabb = entity.getBoundingBox().inflate((double) entity.getPickRadius());
+			java.util.Optional<Vec3> clip = aabb.clip(eyePosition, reachVec);
+			if (aabb.contains(eyePosition)) {
+				target = entity;
+				closestDist = 0.0D;
+				break;
+			} else if (clip.isPresent()) {
+				double dist = eyePosition.distanceTo(clip.get());
+				if (dist < closestDist) {
+					target = entity;
+					closestDist = dist;
+				}
+			}
+		}
+		return target;
+	}
+
+	private static boolean isTargetPillaring(LevelAccessor level, Entity target, Entity self) {
+		if (target == null || self == null) return false;
+		if (target.getY() <= self.getY() + 2.2) return false;
+		BlockPos targetPos = target.blockPosition();
+		int targetY = targetPos.getY() - 1;
+		int selfY = self.blockPosition().getY();
+		int startY = targetY;
+		int endY = Math.max(selfY + 1, targetY - 5);
+		if (startY < endY) return false;
+		int totalSolidCount = 0;
+		int layersChecked = 0;
+		BlockPos.MutableBlockPos mpos = new BlockPos.MutableBlockPos();
+		for (int y = startY; y >= endY; y--) {
+			int layerSolidCount = 0;
+			for (int dx = -1; dx <= 1; dx++) {
+				for (int dz = -1; dz <= 1; dz++) {
+					mpos.set(targetPos.getX() + dx, y, targetPos.getZ() + dz);
+					if (isSolidBlock(level, mpos)) {
+						layerSolidCount++;
+					}
+				}
+			}
+			totalSolidCount += layerSolidCount;
+			layersChecked++;
+		}
+		if (layersChecked == 0) return false;
+		double avgSolid = (double) totalSolidCount / layersChecked;
+		return avgSolid < 4.5;
+	}
+
+	private static void performSmoothCircling(Mob mob, CompoundTag mData, LivingEntity target, LevelAccessor world, double radialDistance, double speed) {
+		double dx = mob.getX() - target.getX();
+		double dz = mob.getZ() - target.getZ();
+		double currentAngle = Math.atan2(dz, dx);
+
+		int orbitDir = mData.getInt("orbit_direction");
+		if (orbitDir == 0) {
+			orbitDir = mob.getRandom().nextBoolean() ? 1 : -1;
+			mData.putInt("orbit_direction", orbitDir);
+		}
+		int orbitCooldown = mData.getInt("orbit_cooldown");
+		if (orbitCooldown > 0) {
+			mData.putInt("orbit_cooldown", orbitCooldown - 1);
+		} else {
+			orbitDir = mob.getRandom().nextBoolean() ? 1 : -1;
+			mData.putInt("orbit_direction", orbitDir);
+			mData.putInt("orbit_cooldown", 100 + mob.getRandom().nextInt(100));
+		}
+
+		if (mob.horizontalCollision) {
+			orbitDir = -orbitDir;
+			mData.putInt("orbit_direction", orbitDir);
+			mData.putInt("orbit_cooldown", 60);
+		}
+
+		double dAngle = 0.20 * orbitDir;
+		double targetAngle = currentAngle + dAngle;
+		double destX = target.getX() + Math.cos(targetAngle) * radialDistance;
+		double destZ = target.getZ() + Math.sin(targetAngle) * radialDistance;
+		BlockPos destPos = findGroundPos(world, destX, target.getY(), destZ);
+
+		mob.getNavigation().moveTo(destPos.getX() + 0.5, destPos.getY(), destPos.getZ() + 0.5, speed);
+		mob.getLookControl().setLookAt(target, 30.0F, 30.0F);
+		updateStateAndLog(mob, mData, "CIRCLING");
+		mData.putBoolean("is_circling", true);
+	}
+
+	private static boolean isSolidBlock(LevelAccessor world, BlockPos pos) {
+		BlockState state = world.getBlockState(pos);
+		return !state.isAir() && !state.getCollisionShape(world, pos).isEmpty();
+	}
+
+	private static BlockPos findPhysicalObstruction(LevelAccessor world, Mob mob, LivingEntity target, double maxRange) {
+		Vec3 start = mob.position();
+		Vec3 end = target.position();
+		
+		int mobFootY = mob.blockPosition().getY();
+		int targetFootY = target.blockPosition().getY();
+		
+		Vec3 dirVec = end.subtract(start);
+		double totalDist = dirVec.length();
+		if (totalDist < 0.2) return null;
+
+		// Horizontal perpendicular vector (in XZ plane) for the wide body passage sweep
+		Vec3 dirXZ = new Vec3(dirVec.x, 0, dirVec.z);
+		Vec3 perp;
+		if (dirXZ.lengthSqr() < 1e-4) {
+			perp = new Vec3(1, 0, 0);
+		} else {
+			dirXZ = dirXZ.normalize();
+			perp = new Vec3(-dirXZ.z, 0, dirXZ.x).normalize();
+		}
+
+		// Step from 0.8 block away from the mob towards the target (up to maxRange)
+		double stepDist = 0.5;
+		double limit = Math.min(totalDist, maxRange);
+
+		BlockPos.MutableBlockPos mpos = new BlockPos.MutableBlockPos();
+		for (double d = 0.8; d <= limit; d += stepDist) {
+			double progress = d / totalDist;
+			// 3D center path that slopes toward target
+			Vec3 center = start.add(0, 0.5, 0).lerp(end.add(0, 0.5, 0), progress);
+			
+			// Scan from foot level (yOffset = 0) up through 4 blocks high (yOffset = 4)
+			for (int yOffset = 0; yOffset < 5; yOffset++) {
+				for (double wOffset = -1.5; wOffset <= 1.5; wOffset += 0.75) {
+					Vec3 checkPt = center.add(perp.scale(wOffset)).add(0, yOffset, 0);
+					mpos.set(checkPt.x, checkPt.y, checkPt.z);
+					
+					if (canMine(world, mpos, mob, target)) {
+						return mpos.immutable();
+					}
+				}
+			}
+		}
+		return null;
+	}
+
+	private static boolean canMine(LevelAccessor world, BlockPos pos, Mob mob, LivingEntity target) {
+		int mobFootY = mob.blockPosition().getY();
+		int posDistSq = (int) Math.round(mob.position().distanceToSqr(pos.getX() + 0.5, mob.getY(), pos.getZ() + 0.5));
+		
+		// 1. NEVER mine floor blocks strictly below mob foot level if within standing radius
+		if (pos.getY() < mobFootY && posDistSq <= 3) {
+			return false;
+		}
+
+		// 2. Protect floor below target and mob (pos.getY() < minimum baseline floor)
+		int effectiveFloor = (target != null) ? Math.min(mobFootY, target.blockPosition().getY()) : mobFootY;
+		if (pos.getY() < effectiveFloor) {
+			return false;
+		}
+
+		BlockState state = world.getBlockState(pos);
+		if (state.isAir()) return false;
+		if (state.getCollisionShape(world, pos).isEmpty()) return false;
+		float speed = state.getDestroySpeed(world, pos);
+		return speed >= 0.0F && speed <= MAX_CLAW_BLOCK_HARDNESS;
+	}
+}
+// Version: 1.21.1
