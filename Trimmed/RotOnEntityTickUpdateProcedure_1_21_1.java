@@ -114,7 +114,7 @@ public class RotOnEntityTickUpdateProcedure {
 	public static boolean ENABLE_PHASE_SHIFT = false;
 	public static double PARTICLE_QUALITY = 1.0;
 	public static double COOLDOWN_MULTIPLIER = 1.5;
-	private static final double TARGET_RANGE = 128.0;
+	public static final double TARGET_RANGE = 128.0;
 
 	public static double ROT_PLAYER_BACK_OFF_DISTANCE = 0.95;
 	public static double ROT_PILLAR_BACK_OFF_DISTANCE = 15.0;
@@ -138,28 +138,28 @@ public class RotOnEntityTickUpdateProcedure {
 	public static double SONIC_BOOM_ANIMATION_TICKS = 90.0;
 	public static double SONIC_BOOM_TRIGGER_TICK = 36.0;
 
-	private static final double LASER_Y_OFFSET = 0.25;
-	private static final double LASER_CLOSING_TICKS = 80.0;
-	private static final double TOTEM_LASER_MIN_DIST = 2.5;
+	public static final double LASER_Y_OFFSET = 0.25;
+	public static final double LASER_CLOSING_TICKS = 80.0;
+	public static final double TOTEM_LASER_MIN_DIST = 2.5;
 
-	private static final double TELEPORT_MIN_GAP = 4.0;
-	private static final double TELEPORT_BACK_OFFSET = 2.4;
-	private static final double TELEPORT_SIDE_MIN = 1.6;
-	private static final double TELEPORT_SIDE_MAX = 3.0;
-	private static final double TELEPORT_MAX_VERTICAL_DIFF = 6.0;
+	public static final double TELEPORT_MIN_GAP = 4.0;
+	public static final double TELEPORT_BACK_OFFSET = 2.4;
+	public static final double TELEPORT_SIDE_MIN = 1.6;
+	public static final double TELEPORT_SIDE_MAX = 3.0;
+	public static final double TELEPORT_MAX_VERTICAL_DIFF = 6.0;
 
-	private static final double DODGE_TRIGGER_DIST = 6.0;
-	private static final double DODGE_SWING_CHANCE = 0.85;
+	public static final double DODGE_TRIGGER_DIST = 6.0;
+	public static final double DODGE_SWING_CHANCE = 0.85;
 
-	private static final int MINE_REACH = 3;
-	private static final int MINE_HEIGHT = 3;
-	private static final int MINE_HALF_WIDTH = 1;
-	private static final float MAX_BREAKABLE_HARDNESS = 60f;
-	private static final float MINE_SPEED_MULTIPLIER = 16.665f;
-	private static final float MINE_SPEED_BASE = 16.665f;
-	private static final double MINE_RAY_DISTANCE = 2.0;
+	public static final int MINE_REACH = 3;
+	public static final int MINE_HEIGHT = 3;
+	public static final int MINE_HALF_WIDTH = 1;
+	public static final float MAX_BREAKABLE_HARDNESS = 60f;
+	public static final float MINE_SPEED_MULTIPLIER = 16.665f;
+	public static final float MINE_SPEED_BASE = 16.665f;
+	public static final double MINE_RAY_DISTANCE = 2.0;
 
-	private static final double DIE_KICK_SPEED = 10.0;
+	public static final double DIE_KICK_SPEED = 10.0;
 
 	public static int TP_DODGE_CD = 40;
 	public static int TP_FLANK_CD = 100;
@@ -587,7 +587,7 @@ public class RotOnEntityTickUpdateProcedure {
 	public static final String K_SRDR = "sentinel_regen_delay_reason";
 
 	
-	private static double getDynamicGlobalCooldown(Entity entity) {
+	public static double getDynamicGlobalCooldown(Entity entity) {
 		if (getRotPersistentBoolean(entity, K_STA2, false) && !getRotPersistentBoolean(entity, K_SIIT, false)) {
 			return 20.0;
 		}
@@ -604,7 +604,7 @@ public class RotOnEntityTickUpdateProcedure {
 		return 160.0 - (ease * 140.0);
 	}
 
-private static float lerpAngle(float pct, float start, float end) {
+public static float lerpAngle(float pct, float start, float end) {
 		float delta = Mth.wrapDegrees(end - start);
 		return start + delta * pct;
 	}
@@ -614,7 +614,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		execute(event, event.getEntity().level(), event.getEntity().getX(), event.getEntity().getY(), event.getEntity().getZ(), event.getEntity());
 	}
 
-	private static String formatTargetNames(List<? extends LivingEntity> entities) {
+	public static String formatTargetNames(List<? extends LivingEntity> entities) {
 		Map<String, Integer> counts = new java.util.LinkedHashMap<>();
 		for (LivingEntity e : entities) {
 			String dName = e.getDisplayName().getString();
@@ -655,7 +655,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return 1.0 + (easeInQuart * 49.0);
 	}
 
-	private static Player getFollowPlayer(LevelAccessor world, Entity self) {
+	public static Player getFollowPlayer(LevelAccessor world, Entity self) {
 		String targetUuid = getRotPersistentString(self, K_MFTU, "");
 		if (!(world instanceof ServerLevel level)) return null;
 		if (targetUuid.isEmpty()) {
@@ -673,7 +673,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static Player getGuardPlayer(LevelAccessor world, Entity self) {
+	public static Player getGuardPlayer(LevelAccessor world, Entity self) {
 		String targetUuid = getRotPersistentString(self, "master_guard_target_uuid", "");
 		if (targetUuid.isEmpty() || !(world instanceof ServerLevel level)) return null;
 		try {
@@ -683,7 +683,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static Entity findGuardThreat(LevelAccessor world, Entity self, Player guardPlayer) {
+	public static Entity findGuardThreat(LevelAccessor world, Entity self, Player guardPlayer) {
 		AABB box = guardPlayer.getBoundingBox().inflate(128.0);
 		List<LivingEntity> threats = world.getEntitiesOfClass(LivingEntity.class, box, candidate -> {
 			if (candidate == self || candidate == guardPlayer || !candidate.isAlive() || candidate instanceof Player) return false;
@@ -701,7 +701,7 @@ private static float lerpAngle(float pct, float start, float end) {
 
 
 
-	private static void execute(@Nullable Event event, LevelAccessor world, double x, double y, double z, Entity entity) {
+	public static void execute(@Nullable Event event, LevelAccessor world, double x, double y, double z, Entity entity) {
 		if (world != null && world.isClientSide()) {
 			if (entity instanceof RotEntity rot) {
 				int solarCharge = rot.getEntityData().get(RotEntity.DATA_sentinel_solar_charge_ticks);
@@ -802,13 +802,13 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void removeIrradiatedEffect(Entity entity) {
+	public static void removeIrradiatedEffect(Entity entity) {
 		if (!(entity instanceof LivingEntity living)) return;
 		BuiltInRegistries.MOB_EFFECT.getHolder(ResourceLocation.parse("alexscaves:irradiated"))
 			.ifPresent(living::removeEffect);
 	}
 
-	private static void monitorWitherSkullOutcome(ServerLevel level, Entity rot) {
+	public static void monitorWitherSkullOutcome(ServerLevel level, Entity rot) {
 		double checkTicks = getRotPersistentDouble(rot, K_SWSOT, 0.0);
 		if (checkTicks <= 0.0) return;
 		String targetUuid = rot.getPersistentData().getString(K_SWSOT2);
@@ -834,7 +834,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void executeInternal(@Nullable Event event, LevelAccessor world, double x, double y, double z, Entity entity) {
+	public static void executeInternal(@Nullable Event event, LevelAccessor world, double x, double y, double z, Entity entity) {
 		boolean isDying = false;
 		isDying = entity.getEntityData().get(net.mcreator.thebackwoods.entity.RotEntity.DATA_isDeath);
 
@@ -3233,7 +3233,7 @@ private static float lerpAngle(float pct, float start, float end) {
 	}
 	}
 
-	private static void handleAdaptiveEffects(LevelAccessor world, Entity self, Entity target, int mode, double dist) {
+	public static void handleAdaptiveEffects(LevelAccessor world, Entity self, Entity target, int mode, double dist) {
 		if (!(world instanceof ServerLevel level) || !(self instanceof LivingEntity ls)) return;
 
 		if (mode == 1) {
@@ -3273,7 +3273,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void disablePlayerShield(LivingEntity victim, int cooldownTicks) {
+	public static void disablePlayerShield(LivingEntity victim, int cooldownTicks) {
 		if (victim instanceof Player player && player.isBlocking()) {
 			player.disableShield();
 			net.minecraft.world.item.ItemStack useItem = player.getUseItem();
@@ -3288,7 +3288,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static Vec3 updateRotLaserAim(Entity entity, Vec3 facePos, Entity target, boolean firing) {
+	public static Vec3 updateRotLaserAim(Entity entity, Vec3 facePos, Entity target, boolean firing) {
 		double curAimX = getRotPersistentDouble(entity, K_SLAX, 0.0);
 		double curAimY = getRotPersistentDouble(entity, K_SLAY, 0.0);
 		double curAimZ = getRotPersistentDouble(entity, K_SLAZ, 0.0);
@@ -3332,7 +3332,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return newAim;
 	}
 
-	private static void spawnLaserChargeRingParticles(ServerLevel level, Entity entity, Vec3 facePos, double radius, int particleCount, net.minecraft.core.particles.ParticleOptions particle) {
+	public static void spawnLaserChargeRingParticles(ServerLevel level, Entity entity, Vec3 facePos, double radius, int particleCount, net.minecraft.core.particles.ParticleOptions particle) {
 		for (int i = 0; i < particleCount; i++) {
 			double angle = entity.getRandom().nextDouble() * Math.PI * 2.0;
 			double yOffset = (entity.getRandom().nextDouble() - 0.5) * radius * 0.5;
@@ -3341,7 +3341,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void spawnFaceJitterBurst(ServerLevel level, LivingEntity living, Vec3 facePos, net.minecraft.core.particles.ParticleOptions particle) {
+	public static void spawnFaceJitterBurst(ServerLevel level, LivingEntity living, Vec3 facePos, net.minecraft.core.particles.ParticleOptions particle) {
 		for (int i = 0; i < 4; i++) {
 			double oX = (living.getRandom().nextDouble() - 0.5) * 0.42;
 			double oY = (living.getRandom().nextDouble() - 0.5) * 0.42;
@@ -3350,7 +3350,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void spawnBeamCylinderHelix(ServerLevel level, Vec3 facePos, Vec3 direction, Vec3 beamEnd, net.minecraft.core.particles.ParticleOptions coreParticle, net.minecraft.core.particles.ParticleOptions helixParticle) {
+	public static void spawnBeamCylinderHelix(ServerLevel level, Vec3 facePos, Vec3 direction, Vec3 beamEnd, net.minecraft.core.particles.ParticleOptions coreParticle, net.minecraft.core.particles.ParticleOptions helixParticle) {
 		double spacing = 0.15 / Mth.clamp(PARTICLE_QUALITY, 0.1, 1.0);
 		Vec3 upVec = Math.abs(direction.y) > 0.92 ? new Vec3(1.0, 0.0, 0.0) : new Vec3(0.0, 1.0, 0.0);
 		Vec3 sideVec = direction.cross(upVec).normalize();
@@ -3376,7 +3376,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void executeSentinelFaceLaserCharging(LevelAccessor world, Entity entity, Entity target, int chargeTicks) {
+	public static void executeSentinelFaceLaserCharging(LevelAccessor world, Entity entity, Entity target, int chargeTicks) {
 		if (!(world instanceof ServerLevel level) || !(entity instanceof LivingEntity living)) return;
 
 		entity.setDeltaMovement(entity.getDeltaMovement().x() * 0.05, entity.getDeltaMovement().y(), entity.getDeltaMovement().z() * 0.05);
@@ -3406,7 +3406,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void executeSentinelFaceLaserFiring(LevelAccessor world, Entity entity, Entity target, int fireTicks) {
+	public static void executeSentinelFaceLaserFiring(LevelAccessor world, Entity entity, Entity target, int fireTicks) {
 		if (!(world instanceof ServerLevel level) || !(entity instanceof LivingEntity living)) return;
 
 		entity.setDeltaMovement(entity.getDeltaMovement().x() * 0.05, entity.getDeltaMovement().y(), entity.getDeltaMovement().z() * 0.05);
@@ -3612,7 +3612,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void executeSentinelCryoLaserCharging(LevelAccessor world, Entity entity, Entity target, int chargeTicks) {
+	public static void executeSentinelCryoLaserCharging(LevelAccessor world, Entity entity, Entity target, int chargeTicks) {
 		if (!(world instanceof ServerLevel level) || !(entity instanceof LivingEntity living)) return;
 
 		entity.setDeltaMovement(entity.getDeltaMovement().x() * 0.05, entity.getDeltaMovement().y(), entity.getDeltaMovement().z() * 0.05);
@@ -3640,7 +3640,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void executeSentinelCryoLaserFiring(LevelAccessor world, Entity entity, Entity target, int fireTicks) {
+	public static void executeSentinelCryoLaserFiring(LevelAccessor world, Entity entity, Entity target, int fireTicks) {
 		if (!(world instanceof ServerLevel level) || !(entity instanceof LivingEntity living)) return;
 
 		entity.setDeltaMovement(entity.getDeltaMovement().x() * 0.05, entity.getDeltaMovement().y(), entity.getDeltaMovement().z() * 0.05);
@@ -3841,7 +3841,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void executeSentinelSonicScream(LevelAccessor world, Entity entity, Entity target, int ticksLeft) {
+	public static void executeSentinelSonicScream(LevelAccessor world, Entity entity, Entity target, int ticksLeft) {
 		if (!(world instanceof ServerLevel level) || !(entity instanceof LivingEntity living)) return;
 
 		if (entity instanceof Mob mob) {
@@ -3904,7 +3904,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void checkLearnedMilestone(LivingEntity self, double combatTicks, boolean inCombat) {
+	public static void checkLearnedMilestone(LivingEntity self, double combatTicks, boolean inCombat) {
 		net.minecraft.nbt.CompoundTag data = self.getPersistentData();
 
 		Entity target = (self instanceof Mob mob) ? mob.getTarget() : null;
@@ -4070,12 +4070,12 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void announceLearnedAbility(Entity self) {
+	public static void announceLearnedAbility(Entity self) {
 		if (self == null) return;
 		playHostileSound(self.level(), self.getX(), self.getY(), self.getZ(), "entity.warden.heartbeat", 1.2F, 1.4F);
 	}
 
-	private static void executeGrappleSiphon(LevelAccessor world, Entity self, Entity target, int ticksLeft) {
+	public static void executeGrappleSiphon(LevelAccessor world, Entity self, Entity target, int ticksLeft) {
 		if (!(world instanceof ServerLevel level) || !(self instanceof LivingEntity rawSelf)) return;
 
 		Vec3 vectorToSelf = self.position().add(0, 1.0, 0).subtract(target.position()).normalize();
@@ -4104,7 +4104,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void executeTelekinesis(LevelAccessor world, Entity self, Entity target, int ticksLeft) {
+	public static void executeTelekinesis(LevelAccessor world, Entity self, Entity target, int ticksLeft) {
 		if (!(world instanceof ServerLevel level) || target == null) return;
 
 		Vec3 hoverPos = self.position().add(0, 3.5, 0);
@@ -4135,7 +4135,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void executeSentinelPunch(LevelAccessor world, Entity self, Entity target) {
+	public static void executeSentinelPunch(LevelAccessor world, Entity self, Entity target) {
 		if (!(world instanceof ServerLevel level)) return;
 		LivingEntity ls = (self instanceof LivingEntity) ? (LivingEntity) self : null;
 
@@ -4596,13 +4596,13 @@ private static float lerpAngle(float pct, float start, float end) {
 		level.sendParticles(ParticleTypes.DAMAGE_INDICATOR, target.getX(), target.getY() + 1.0, target.getZ(), 3, 0.1, 0.1, 0.1, 0.02);
 	}
 
-	private static boolean isWither(Entity entity) {
+	public static boolean isWither(Entity entity) {
 		if (entity == null) return false;
 		String key = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString();
 		return "minecraft:wither".equals(key);
 	}
 
-	private static void sendActionBarToNearbyPlayers(LevelAccessor world, Vec3 pos, double range, String text) {
+	public static void sendActionBarToNearbyPlayers(LevelAccessor world, Vec3 pos, double range, String text) {
 		if (world instanceof ServerLevel s) {
 			s.players().stream()
 				.filter(p -> p.position().distanceToSqr(pos) <= range * range)
@@ -4610,7 +4610,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static boolean isTargetPillaring(LevelAccessor level, Entity target, Entity self) {
+	public static boolean isTargetPillaring(LevelAccessor level, Entity target, Entity self) {
 		if (target == null || self == null) return false;
 		if (target.getY() <= self.getY() + 2.2) return false;
 		net.minecraft.core.BlockPos targetPos = target.blockPosition();
@@ -4639,7 +4639,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return avgSolid < 4.5;
 	}
 
-	private static void snapLookAtTarget(Entity entity, Entity target) {
+	public static void snapLookAtTarget(Entity entity, Entity target) {
 		if (entity == null || target == null) return;
 		double dx = target.getX() - entity.getX();
 		double dy = (target.getY() + target.getBbHeight() * 0.5) - (entity.getY() + entity.getEyeHeight());
@@ -4672,7 +4672,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void lockLookAtTarget(Entity entity, Vec3 targetPos) {
+	public static void lockLookAtTarget(Entity entity, Vec3 targetPos) {
 		if (entity == null || targetPos == null) return;
 		double dieKickPhase = getRotPersistentDouble(entity, K_SDKP, 0.0);
 		double judgmentTicks = getRotPersistentDouble(entity, K_SJT, 0.0);
@@ -4708,7 +4708,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void lockLookAtTarget(Entity entity, Entity target) {
+	public static void lockLookAtTarget(Entity entity, Entity target) {
 		if (entity == null || target == null) return;
 		double dieKickPhase = getRotPersistentDouble(entity, K_SDKP, 0.0);
 		double judgmentTicks = getRotPersistentDouble(entity, K_SJT, 0.0);
@@ -4783,7 +4783,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static List<LivingEntity> getEntitiesInPlayerFOV(Player player, double range) {
+	public static List<LivingEntity> getEntitiesInPlayerFOV(Player player, double range) {
 		List<LivingEntity> targets = new java.util.ArrayList<>();
 		Vec3 eyePosition = player.getEyePosition(1.0F);
 		Vec3 lookVec = player.getViewVector(1.0F).normalize();
@@ -4817,7 +4817,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return targets;
 	}
 
-	private static Entity getPlayerFOVTarget(Player player, double range) {
+	public static Entity getPlayerFOVTarget(Player player, double range) {
 		Vec3 eyePosition = player.getEyePosition(1.0F);
 		Vec3 lookVec = player.getViewVector(1.0F);
 		Vec3 reachVec = eyePosition.add(lookVec.x * range, lookVec.y * range, lookVec.z * range);
@@ -4856,7 +4856,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return target;
 	}
 
-	private static Entity acquireTarget(LevelAccessor world, Entity self, double x, double y, double z) {
+	public static Entity acquireTarget(LevelAccessor world, Entity self, double x, double y, double z) {
 		if (getRotPersistentBoolean(self, K_MGM, false)) {
 			Player guardPlayer = getGuardPlayer(world, self);
 			if (guardPlayer == null) return null;
@@ -5064,7 +5064,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return target;
 	}
 
-	private static boolean isTargetOccupied(LevelAccessor world, Entity self, LivingEntity target) {
+	public static boolean isTargetOccupied(LevelAccessor world, Entity self, LivingEntity target) {
 		if (target == null) return false;
 		AABB searchBox = self.getBoundingBox().inflate(64.0);
 		List<RotEntity> otherRots = world.getEntitiesOfClass(RotEntity.class, searchBox, e -> e != self);
@@ -5076,11 +5076,11 @@ private static float lerpAngle(float pct, float start, float end) {
 		return false;
 	}
 
-	private static boolean isValidTarget(Entity target, Entity self) {
+	public static boolean isValidTarget(Entity target, Entity self) {
 		return isValidTarget(target, self, false);
 	}
 
-	private static boolean isValidTarget(Entity target, Entity self, boolean ignoreLineOfSight) {
+	public static boolean isValidTarget(Entity target, Entity self, boolean ignoreLineOfSight) {
 		if (target == null || !target.isAlive() || target == self) return false;
 		if (target instanceof Player && getRotPersistentBoolean(self, K_MFE, false)) {
 			Player followMaster = getFollowPlayer(self.level(), self);
@@ -5184,7 +5184,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return bypassFactionFilter;
 	}
 
-	private static boolean isArphexEntity(Entity target) {
+	public static boolean isArphexEntity(Entity target) {
 		if (target == null) return false;
 		ResourceLocation entityId = BuiltInRegistries.ENTITY_TYPE.getKey(target.getType());
 		String tid = entityId.toString().toLowerCase(java.util.Locale.ROOT);
@@ -5225,7 +5225,7 @@ private static float lerpAngle(float pct, float start, float end) {
 			|| typeId.contains("splinter") || typeId.contains("woodbound") || typeId.contains("stilt") || typeId.contains("hollow") || typeId.contains("gigas") || typeId.contains("palus") || typeId.contains("rot");
 	}
 
-	private static void handleAdaptationScaling(Entity entity, boolean inCombat) {
+	public static void handleAdaptationScaling(Entity entity, boolean inCombat) {
 		if (!(entity instanceof LivingEntity living)) return;
 		double combatTicks = entity.getPersistentData().getDouble(K_SCT);
 		if (inCombat) {
@@ -5424,7 +5424,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void fireSuperchargedSonicBoom(LevelAccessor world, Entity self, Entity target) {
+	public static void fireSuperchargedSonicBoom(LevelAccessor world, Entity self, Entity target) {
 		if (!(world instanceof ServerLevel level)) return;
 		self.getPersistentData().putDouble(K_SST, SONIC_BOOM_ANIMATION_TICKS);
 		setRotPersistentBoolean(self, K_SST3, false);
@@ -5432,7 +5432,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		playHostileSound(world, self.getX(), self.getY(), self.getZ(), "entity.warden.sonic_charge", 1.4F, 0.4F);
 	}
 
-	private static void cleanupSonicBoomState(Entity entity) {
+	public static void cleanupSonicBoomState(Entity entity) {
 		setRotPersistentDouble(entity, K_SST, 0.0);
 		setRotPersistentBoolean(entity, K_SST3, false);
 		setRotPersistentDouble(entity, K_SSRA, 0.0);
@@ -5444,7 +5444,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void fireSuperchargedSonicBoomEffectAndDamage(LevelAccessor world, Entity self, Entity target) {
+	public static void fireSuperchargedSonicBoomEffectAndDamage(LevelAccessor world, Entity self, Entity target) {
 		if (!(world instanceof ServerLevel level)) return;
 		playHostileSound(world, self.getX(), self.getY(), self.getZ(), "entity.warden.sonic_boom", 1.5F, 0.3F);
 
@@ -5497,7 +5497,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void tryPredictiveDodge(LevelAccessor world, Entity self, Entity target, double dist) {
+	public static void tryPredictiveDodge(LevelAccessor world, Entity self, Entity target, double dist) {
 		if (self.getPersistentData().getDouble(K_TP_DODGE_CD) > 0) return;
 		if (!(target instanceof LivingEntity tl) || dist > DODGE_TRIGGER_DIST) return;
 
@@ -5542,7 +5542,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		trySafeTeleportToGround(world, self, tx, target.getY(), tz, "entity.warden.attack_impact", 1.5f, 0.85f, K_TP_DODGE_CD, TP_DODGE_CD);
 	}
 
-	private static void tryFlankTeleport(LevelAccessor world, Entity self, Entity target, double dist) {
+	public static void tryFlankTeleport(LevelAccessor world, Entity self, Entity target, double dist) {
 		if (self.getPersistentData().getDouble(K_TP_FLANK_CD) > 0) return;
 		if (!getRotPersistentBoolean(self, K_UT, false)) return;
 		boolean targetInWater = target.isInWater() || target.isUnderWater();
@@ -5577,7 +5577,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static boolean trySafeTeleportNearTarget(LevelAccessor world, Entity self, Entity target, double targetX, double targetY, double targetZ, String soundId, float vol, float pitch, String cdKey, int cdTicks) {
+	public static boolean trySafeTeleportNearTarget(LevelAccessor world, Entity self, Entity target, double targetX, double targetY, double targetZ, String soundId, float vol, float pitch, String cdKey, int cdTicks) {
 		if (!(world instanceof Level level)) return false;
 		for (int horizontalOffset = 0; horizontalOffset <= 2; horizontalOffset++) {
 			for (int side = -horizontalOffset; side <= horizontalOffset; side++) {
@@ -5599,7 +5599,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return false;
 	}
 
-	private static boolean isSafeWaterTeleportSpot(Level level, double x, double y, double z) {
+	public static boolean isSafeWaterTeleportSpot(Level level, double x, double y, double z) {
 		BlockPos feet = BlockPos.containing(x, y, z);
 		BlockPos head = feet.above();
 		BlockState feetState = level.getBlockState(feet);
@@ -5690,7 +5690,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void playTeleportEffects(ServerLevel level, Entity entity, double x, double y, double z) {
+	public static void playTeleportEffects(ServerLevel level, Entity entity, double x, double y, double z) {
 		Entity target = (entity instanceof Mob mob) ? mob.getTarget() : null;
 		net.minecraft.core.particles.ParticleOptions mainParticle = ParticleTypes.PORTAL;
 		net.minecraft.core.particles.ParticleOptions secondaryParticle = ParticleTypes.CAMPFIRE_COSY_SMOKE;
@@ -5732,7 +5732,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		playHostileSound(level, x, y, z, sound, vol, pitch);
 	}
 
-	private static net.minecraft.core.particles.ParticleOptions getAdaptiveBeamParticle(Entity self) {
+	public static net.minecraft.core.particles.ParticleOptions getAdaptiveBeamParticle(Entity self) {
 		Entity target = (self instanceof Mob mob) ? mob.getTarget() : null;
 		if (target != null) {
 			String targetId = BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()).toString();
@@ -5800,7 +5800,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return false;
 	}
 
-	private static double findTargetGroundY(LevelAccessor world, double tx, double referenceY, double tz) {
+	public static double findTargetGroundY(LevelAccessor world, double tx, double referenceY, double tz) {
 		if (world instanceof Level level) {
 			BlockPos refPos = BlockPos.containing(tx, referenceY + 2, tz);
 			boolean inTunnel = !level.getBlockState(refPos).isAir() && level.getBlockState(refPos).isSolid();
@@ -5822,7 +5822,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return referenceY;
 	}
 
-	private static boolean trySafeTeleportToGround(LevelAccessor world, Entity self, double targetX, double targetY, double targetZ, String soundId, float vol, float pitch, String cdKey, int cdTicks) {
+	public static boolean trySafeTeleportToGround(LevelAccessor world, Entity self, double targetX, double targetY, double targetZ, String soundId, float vol, float pitch, String cdKey, int cdTicks) {
 		double groundY = findTargetGroundY(world, targetX, targetY, targetZ);
 		if (Math.abs(groundY - targetY) > 3.0) return false;
 		if (!isSafeTeleportSpot(world, targetX, groundY, targetZ, self.getY())) return false;
@@ -5839,7 +5839,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return true;
 	}
 
-	private static boolean isSafeTeleportSpot(LevelAccessor world, double x, double y, double z, double fromY) {
+	public static boolean isSafeTeleportSpot(LevelAccessor world, double x, double y, double z, double fromY) {
 		BlockPos feet = BlockPos.containing(x, y, z);
 		BlockPos head = feet.above();
 		BlockPos below = feet.below();
@@ -5854,7 +5854,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return true;
 	}
 
-	private static void handleForwardCarveMining(LevelAccessor world, Entity self, Entity target) {
+	public static void handleForwardCarveMining(LevelAccessor world, Entity self, Entity target) {
 		if (target != null && isTargetPillaring(world, target, self)) {
 			double tdx = target.getX() - self.getX();
 			double tdz = target.getZ() - self.getZ();
@@ -6190,7 +6190,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static boolean isPositionClaimed(LevelAccessor world, BlockPos pos, Entity thisEntity) {
+	public static boolean isPositionClaimed(LevelAccessor world, BlockPos pos, Entity thisEntity) {
 		net.minecraft.world.phys.AABB box = new net.minecraft.world.phys.AABB(pos).inflate(3);
 		java.util.List<RotEntity> others = world.getEntitiesOfClass(RotEntity.class, box, e -> e != thisEntity && e.isAlive());
 		int ourProgress = thisEntity instanceof RotEntity rot ? rot.getEntityData().get(RotEntity.DATA_mineProgress) : 0;
@@ -6208,7 +6208,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return false;
 	}
 
-	private static boolean canMine(LevelAccessor world, BlockPos pos, LivingEntity player) {
+	public static boolean canMine(LevelAccessor world, BlockPos pos, LivingEntity player) {
 		BlockState state = world.getBlockState(pos);
 		if (state.isAir()) return false;
 		if (state.getCollisionShape(world, pos).isEmpty()) return false;
@@ -6218,7 +6218,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return true;
 	}
 
-	private static boolean isDoingCombo(Entity entity) {
+	public static boolean isDoingCombo(Entity entity) {
 		return entity.getPersistentData().getDouble(K_SCAT) > 0
 			|| entity.getPersistentData().getDouble(K_SSWST) > 0
 			|| entity.getPersistentData().getDouble(K_SJT) > 0
@@ -6232,7 +6232,7 @@ private static float lerpAngle(float pct, float start, float end) {
 			|| entity.getPersistentData().getDouble(K_SCS5) > 0;
 	}
 
-	private static void checkTrenchAndJump(LevelAccessor world, Entity self, Entity target) {
+	public static void checkTrenchAndJump(LevelAccessor world, Entity self, Entity target) {
 		if (!(self instanceof LivingEntity living) || !living.onGround()) {
 			return;
 		}
@@ -6300,7 +6300,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void handlePassengerAndGrowth(Entity entity) {
+	public static void handlePassengerAndGrowth(Entity entity) {
 		if (entity.isPassenger()) entity.stopRiding();
 
 		entity.getPersistentData().putDouble(K_AGE, entity.getPersistentData().getDouble(K_AGE) + 1);
@@ -6312,7 +6312,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static final String[] ROT_COOLDOWN_KEYS = {
+	public static final String[] ROT_COOLDOWN_KEYS = {
 		K_TP_DODGE_CD, K_TP_FLANK_CD, K_SOLAR_CD, K_ADAPT_CD, K_GRAPPLE_CD, K_TK_CD,
 		K_RWDC, "sentinel_wither_skull_cd", K_SFIC,
 		K_SWSC, K_SGAC, K_SST,
@@ -6330,19 +6330,19 @@ private static float lerpAngle(float pct, float start, float end) {
 		K_RPT, K_RSC2, K_RSC, K_RSA
 	};
 
-	private static void tickCooldowns(Entity e) {
+	public static void tickCooldowns(Entity e) {
 		boolean totemAccelerated = getRotPersistentBoolean(e, K_STA2, false) && !getRotPersistentBoolean(e, K_SIIT, false);
 		for (String key : ROT_COOLDOWN_KEYS) {
 			if (e.getPersistentData().contains(key)) tickCooldown(e, key, 1, totemAccelerated);
 		}
 	}
 
-	private static void tickCooldown(Entity e, String key, int step) {
+	public static void tickCooldown(Entity e, String key, int step) {
 		boolean totemAccelerated = getRotPersistentBoolean(e, K_STA2, false) && !getRotPersistentBoolean(e, K_SIIT, false);
 		tickCooldown(e, key, step, totemAccelerated);
 	}
 
-	private static void tickCooldown(Entity e, String key, int step, boolean totemAccelerated) {
+	public static void tickCooldown(Entity e, String key, int step, boolean totemAccelerated) {
 		double v = e.getPersistentData().getDouble(key);
 		if (v > 0.0) {
 			double finalStep = step;
@@ -6360,7 +6360,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void playHostileSound(LevelAccessor world, double x, double y, double z, String soundId, float volume, float pitch) {
+	public static void playHostileSound(LevelAccessor world, double x, double y, double z, String soundId, float volume, float pitch) {
 		if (!(world instanceof Level level)) return;
 		net.minecraft.sounds.SoundEvent sound = BuiltInRegistries.SOUND_EVENT.get(ResourceLocation.parse(soundId));
 		if (sound != null) {
@@ -6372,7 +6372,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void stopHostileSound(LevelAccessor world, double x, double y, double z, String soundId, double range) {
+	public static void stopHostileSound(LevelAccessor world, double x, double y, double z, String soundId, double range) {
 		if (world instanceof ServerLevel level) {
 			net.minecraft.network.protocol.game.ClientboundStopSoundPacket packet = new net.minecraft.network.protocol.game.ClientboundStopSoundPacket(ResourceLocation.parse(soundId), SoundSource.HOSTILE);
 			for (ServerPlayer player : level.getPlayers(p -> p.position().distanceToSqr(x, y, z) <= range * range)) {
@@ -6381,7 +6381,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void applyKnockbackAndSync(Entity victim, double vx, double vy, double vz) {
+	public static void applyKnockbackAndSync(Entity victim, double vx, double vy, double vz) {
 		if (!(victim instanceof Player)) {
 			vx *= 1.6;
 			vz *= 1.6;
@@ -6395,7 +6395,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void teleportEntity(Entity ent, double x, double y, double z) {
+	public static void teleportEntity(Entity ent, double x, double y, double z) {
 		double startX = ent.getX();
 		double startY = ent.getY();
 		double startZ = ent.getZ();
@@ -6418,7 +6418,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void spawnTeleportTrail(ServerLevel level, double startX, double startY, double startZ, double targetX, double targetY, double targetZ) {
+	public static void spawnTeleportTrail(ServerLevel level, double startX, double startY, double startZ, double targetX, double targetY, double targetZ) {
 		Vec3 start = new Vec3(startX, startY, startZ);
 		Vec3 end = new Vec3(targetX, targetY, targetZ);
 		double distance = start.distanceTo(end);
@@ -6454,7 +6454,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static Entity findEntityInWorldRange(LevelAccessor world, Class<? extends Entity> clazz, double x, double y, double z, double range, Entity self) {
+	public static Entity findEntityInWorldRange(LevelAccessor world, Class<? extends Entity> clazz, double x, double y, double z, double range, Entity self) {
 		AABB searchBox = AABB.ofSize(new Vec3(x, y, z), range, range, range);
 		java.util.Set<Integer> occupiedTargetIds = new java.util.HashSet<>();
 		try {
@@ -6517,7 +6517,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return solarCharge > 0 || solarFire > 0 || cryoCharge > 0 || cryoFire > 0 || grappleTicks > 0 || tkTicks > 0 || sonicTicks > 0 || closingTicks > 0 || skyWarp > 0 || judgment > 0 || riderHold > 0 || omniSonic > 0 || sonicScream > 0 || armorRipTicks > 0 || blockTicks > 0 || isUppercutting || superheatCharging > 0 || superheatActive > 0 || isDoingCombo(entity);
 	}
 
-	private static void syncNBTFlags(Entity entity) {
+	public static void syncNBTFlags(Entity entity) {
 		double solarCharge = entity.getPersistentData().getDouble(K_SSCT);
 		double cryoCharge = entity.getPersistentData().getDouble(K_SCCT);
 		double solarFire = entity.getPersistentData().getDouble(K_SSFT);
@@ -6711,7 +6711,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static boolean handleSuperheatEvaporationState(LevelAccessor world, Entity entity, @Nullable Entity combatTarget) {
+	public static boolean handleSuperheatEvaporationState(LevelAccessor world, Entity entity, @Nullable Entity combatTarget) {
 		if (entity == null || !(world instanceof ServerLevel serverLevel)) return false;
 
 		boolean learnedSuperheat = getRotPersistentBoolean(entity, K_UWE, false)
@@ -6923,7 +6923,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return false;
 	}
 
-	private static boolean handleOverheadState(LevelAccessor world, Entity entity, @Nullable Entity combatTarget) {
+	public static boolean handleOverheadState(LevelAccessor world, Entity entity, @Nullable Entity combatTarget) {
 		double overheadTicks = entity.getPersistentData().getDouble(K_ROT);
 		if (getRotPersistentBoolean(entity, K_DFO, false)) {
 			if (overheadTicks <= 1) {
@@ -7014,7 +7014,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return false;
 	}
 
-	private static boolean handleThreatAwareEvasiveSpacing(LevelAccessor world, Entity entity, @Nullable Entity combatTarget) {
+	public static boolean handleThreatAwareEvasiveSpacing(LevelAccessor world, Entity entity, @Nullable Entity combatTarget) {
 		if (entity == null || combatTarget == null || !combatTarget.isAlive()) {
 			return false;
 		}
@@ -7094,7 +7094,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return false;
 	}
 
-	private static boolean handleDiveCounterState(LevelAccessor world, Entity entity, @Nullable Entity combatTarget) {
+	public static boolean handleDiveCounterState(LevelAccessor world, Entity entity, @Nullable Entity combatTarget) {
 		if (entity == null) {
 			return false;
 		}
@@ -7224,7 +7224,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return true;
 	}
 
-	private static void handleHeavyPunchState(LevelAccessor world, Entity entity, @Nullable Entity combatTarget) {
+	public static void handleHeavyPunchState(LevelAccessor world, Entity entity, @Nullable Entity combatTarget) {
 		double heavyLeftTicks = entity.getPersistentData().getDouble(K_SHLPT);
 		double heavyRightTicks = entity.getPersistentData().getDouble(K_SHRPT);
 
@@ -7272,7 +7272,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void executeMinosHeavyPunchBlink(LevelAccessor world, Entity entity, LivingEntity targetLiv, boolean isLeftHand) {
+	public static void executeMinosHeavyPunchBlink(LevelAccessor world, Entity entity, LivingEntity targetLiv, boolean isLeftHand) {
 		if (targetLiv == null || !hasHeavyPunchSupport(world, targetLiv)) return;
 		if (getRotPersistentDouble(entity, K_SSFT, 0.0) > 0 || getRotPersistentDouble(entity, K_SSCT, 0.0) > 0
 			|| getRotPersistentDouble(entity, K_SCFT, 0.0) > 0 || getRotPersistentDouble(entity, K_SCCT, 0.0) > 0) {
@@ -7323,7 +7323,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static boolean hasHeavyPunchSupport(LevelAccessor world, LivingEntity target) {
+	public static boolean hasHeavyPunchSupport(LevelAccessor world, LivingEntity target) {
 		if (target == null || target.onGround() || target.isInWater() || target.isInLava()) return true;
 		BlockPos belowTarget = BlockPos.containing(target.getX(), target.getBoundingBox().minY - 0.05, target.getZ());
 		BlockState belowState = world.getBlockState(belowTarget);
@@ -7333,7 +7333,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return !world.getBlockState(feet).blocksMotion() && !world.getBlockState(head).blocksMotion();
 	}
 
-	private static boolean isTargetCornered(LevelAccessor world, Entity target, Entity attacker) {
+	public static boolean isTargetCornered(LevelAccessor world, Entity target, Entity attacker) {
 		if (target == null) return false;
 		int solidBlocks = 0;
 		BlockPos p = target.blockPosition();
@@ -7357,7 +7357,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return false;
 	}
 
-	private static boolean handleSlamState(LevelAccessor world, Entity entity, @Nullable Entity combatTarget) {
+	public static boolean handleSlamState(LevelAccessor world, Entity entity, @Nullable Entity combatTarget) {
 		double slamPhase = entity.getPersistentData().getDouble(K_SSP);
 		double slamTicks = entity.getPersistentData().getDouble(K_SST2);
 
@@ -7420,7 +7420,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return false;
 	}
 
-	private static boolean handleDieKickState(LevelAccessor world, Entity entity, @Nullable Entity combatTarget) {
+	public static boolean handleDieKickState(LevelAccessor world, Entity entity, @Nullable Entity combatTarget) {
 		double dieKickPhase = entity.getPersistentData().getDouble(K_SDKP);
 		double dieKickTicks = entity.getPersistentData().getDouble(K_SDKT);
 
@@ -7561,7 +7561,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return false;
 	}
 
-	private static void executeCrushLandingBlast(LevelAccessor world, Entity self, @Nullable Entity target, boolean shakeCamera) {
+	public static void executeCrushLandingBlast(LevelAccessor world, Entity self, @Nullable Entity target, boolean shakeCamera) {
 		if (!(world instanceof ServerLevel level)) return;
 		LivingEntity ls = (self instanceof LivingEntity) ? (LivingEntity) self : null;
 		
@@ -7661,7 +7661,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static double findGroundY(LevelAccessor world, Entity entity) {
+	public static double findGroundY(LevelAccessor world, Entity entity) {
 		BlockPos pos = entity.blockPosition();
 		int minY = world.getMinBuildHeight();
 		int startY = pos.getY();
@@ -7679,7 +7679,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return minY + 1.0;
 	}
 
-	private static boolean isHighAboveGround(Entity entity, double height) {
+	public static boolean isHighAboveGround(Entity entity, double height) {
 		LevelAccessor world = entity.level();
 		BlockPos pos = entity.blockPosition();
 		for (int i = 1; i <= (int) Math.ceil(height); i++) {
@@ -7691,7 +7691,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return true;
 	}
 
-	private static void breakBlocksBehindTarget(LevelAccessor world, Entity target, Vec3 push, boolean totemActive) {
+	public static void breakBlocksBehindTarget(LevelAccessor world, Entity target, Vec3 push, boolean totemActive) {
 		if (!(world instanceof ServerLevel level) || target == null) return;
 		double height = target.getBbHeight();
 		Vec3 targetPos = target.position();
@@ -7725,7 +7725,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static void sendCameraShake(float intensity, int duration, float range) {
+	public static void sendCameraShake(float intensity, int duration, float range) {
 		try {
 			Class<?> msgClass = Class.forName("com.github.alexmodguy.citadel.server.message.CameraShakeMessage");
 			java.lang.reflect.Constructor<?> constructor = msgClass.getConstructor(float.class, int.class, float.class);
@@ -7738,7 +7738,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static boolean handleScanningState(Entity entity) {
+	public static boolean handleScanningState(Entity entity) {
 		double scanningTicks = entity.getPersistentData().getDouble(K_SST4);
 		if (scanningTicks > 0) {
 			entity.getPersistentData().putDouble(K_SST4, scanningTicks - 1.0);
@@ -7800,7 +7800,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return false;
 	}
 
-	private static boolean handleCustomCombos(LevelAccessor world, Entity entity, @Nullable Entity combatTarget) {
+	public static boolean handleCustomCombos(LevelAccessor world, Entity entity, @Nullable Entity combatTarget) {
 		double cc1 = entity.getPersistentData().getDouble(K_SCS2);
 		double cc2 = entity.getPersistentData().getDouble(K_SCS);
 		double cc3 = entity.getPersistentData().getDouble(K_SCS3);
@@ -8341,7 +8341,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return false;
 	}
 
-	private static boolean isIndestructibleArmorStack(ItemStack stack) {
+	public static boolean isIndestructibleArmorStack(ItemStack stack) {
 		if (stack.isEmpty()) return false;
 		if (stack.getMaxDamage() <= 0) return true;
 		if (!stack.isDamageableItem()) return true;
@@ -8359,7 +8359,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		return false;
 	}
 
-	private static void executeArmorRipChoke(LevelAccessor world, Entity entity, @Nullable Entity combatTarget, int tickRemaining) {
+	public static void executeArmorRipChoke(LevelAccessor world, Entity entity, @Nullable Entity combatTarget, int tickRemaining) {
 		if (combatTarget == null || !combatTarget.isAlive()) {
 			entity.getPersistentData().putDouble(K_RART, 0);
 			entity.getPersistentData().putBoolean(K_IAR, false);
@@ -8556,7 +8556,7 @@ private static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	private static boolean shouldIgnoreCombatFilter(Entity entity) {
+	public static boolean shouldIgnoreCombatFilter(Entity entity) {
 		if (entity == null) return false;
 		if (getRotPersistentBoolean(entity, "has_kill_command_override", false)
 			|| entity.getTags().contains("mob_battle")
@@ -8578,52 +8578,23 @@ private static float lerpAngle(float pct, float start, float end) {
 		return false;
 	}
 
-
 	// =========================================================================
-	// DELEGATION BRIDGES TO RotBrainProcedure (Maintains 100% Exact In-Game AI Logic)
+	// ROT BRAIN & COMBAT SYSTEM INTEGRATION BRIDGES
 	// =========================================================================
-	public static class CombatContext extends RotBrainProcedure.CombatContext {}
-	public static class AbilityInfo extends RotBrainProcedure.AbilityInfo {
-		public AbilityInfo(String id, String animKey, double baseDmg, double cdTicks, double minR, double maxR) {
-			super(id, animKey, baseDmg, cdTicks, minR, maxR);
-		}
-	}
-	public static class InterceptionPrediction extends RotBrainProcedure.InterceptionPrediction {}
-	public static class PersonalityVector extends RotBrainProcedure.PersonalityVector {}
-	public static class TacticalNeuralNetwork extends RotBrainProcedure.TacticalNeuralNetwork {}
-	public static class WelfordTracker extends RotBrainProcedure.WelfordTracker {}
-	public static class PlayerBehaviorTracker extends RotBrainProcedure.PlayerBehaviorTracker {}
-	public static class RoleAuction extends RotBrainProcedure.RoleAuction {}
-	public static class RotHivemindSavedData extends RotBrainProcedure.RotHivemindSavedData {}
-	public static class CombatProfile extends RotBrainProcedure.CombatProfile {}
-	public static class UniversalCombatPredictionEngine extends RotBrainProcedure.UniversalCombatPredictionEngine {}
-
 	public static RotBrainProcedure.CombatContext getCombatContext(Entity self, Entity target) {
 		return RotBrainProcedure.getCombatContext(self, target);
 	}
 
-	public static List<RotBrainProcedure.AbilityInfo> getAvailableAbilities(Entity self) {
-		return RotBrainProcedure.getAvailableAbilities(self);
-	}
-
-	public static void recordAttack(Entity self, String attackType) {
-		RotBrainProcedure.recordAttack(self, attackType);
-	}
-
-	public static double getDynamicRangeThreshold(Entity entity, String key, double baseRange, double variance) {
-		return RotBrainProcedure.getDynamicRangeThreshold(entity, key, baseRange, variance);
-	}
-
-	public static double getEffectiveCombatTicks(Entity entity) {
-		return RotBrainProcedure.getEffectiveCombatTicks(entity);
+	public static java.util.List<RotBrainProcedure.AbilityInfo> getAvailableAbilities(Entity entity) {
+		return RotBrainProcedure.getAvailableAbilities(entity);
 	}
 
 	public static RotBrainProcedure.AbilityInfo getAbilityById(String id) {
 		return RotBrainProcedure.getAbilityById(id);
 	}
 
-	public static boolean evaluateComboTriggerChance(Entity self, Entity target, RotBrainProcedure.CombatContext ctx) {
-		return RotBrainProcedure.evaluateComboTriggerChance(self, target, ctx);
+	public static void recordAttack(Entity self, String attackType) {
+		RotBrainProcedure.recordAttack(self, attackType);
 	}
 
 	public static RotBrainProcedure.TargetIntent inferTargetIntent(Entity self, Entity target) {
@@ -8634,344 +8605,58 @@ private static float lerpAngle(float pct, float start, float end) {
 		RotBrainProcedure.adaptCapabilitiesToIntent(self, intent);
 	}
 
-	public static boolean isHazardousLocation(LevelAccessor world, double x, double y, double z) {
-		return RotBrainProcedure.isHazardousLocation(world, x, y, z);
+	public static void cancelActiveCombosAndAbilities(Entity entity) {
+		RotBrainProcedure.cancelActiveCombosAndAbilities(entity);
 	}
 
-	public static boolean interceptEnderPearlsPipeline(LevelAccessor world, Entity self, Entity target) {
-		return RotBrainProcedure.interceptEnderPearlsPipeline(world, self, target);
+	public static boolean handleTotemStealing(LevelAccessor world, Entity entity, Entity target) {
+		return RotBrainProcedure.handleTotemStealing(world, entity, target);
 	}
 
-	public static RotBrainProcedure.InterceptionPrediction evaluateInterceptionPipeline(Entity self, Entity target, RotBrainProcedure.TargetIntent intent) {
-		return RotBrainProcedure.evaluateInterceptionPipeline(self, target, intent);
+	public static boolean checkAndSeekDroppedTotems(LevelAccessor world, Entity entity) {
+		return RotBrainProcedure.checkAndSeekDroppedTotems(world, entity);
 	}
 
-	public static RotBrainProcedure.InterceptionPrediction evaluateInterception(RotBrainProcedure.AbilityInfo ability, Entity self, Entity target) {
-		return RotBrainProcedure.evaluateInterception(ability, self, target);
+	public static boolean isHazardousLocation(LevelAccessor world, BlockPos pos) {
+		return RotBrainProcedure.isHazardousLocation(world, pos);
 	}
 
-	public static double scoreAbility(RotBrainProcedure.AbilityInfo ability, RotBrainProcedure.CombatContext ctx, Entity self, Entity target) {
-		return RotBrainProcedure.scoreAbility(ability, ctx, self, target);
+	public static boolean interceptEnderPearlsPipeline(LevelAccessor world, Entity self) {
+		return RotBrainProcedure.interceptEnderPearlsPipeline(world, self);
 	}
 
-	public static double getMemoryPenalty(Entity self, String attackType) {
-		return RotBrainProcedure.getMemoryPenalty(self, attackType);
+	public static boolean isWroughtnautStuck(LivingEntity target) {
+		return RotBrainProcedure.isWroughtnautStuck(target);
 	}
 
-	public static int evaluateComboUtility(Entity self, Entity target, RotBrainProcedure.CombatContext ctx, java.util.List<Integer> available) {
-		return RotBrainProcedure.evaluateComboUtility(self, target, ctx, available);
+	public static boolean isWroughtnautAttacking(LivingEntity target) {
+		return RotBrainProcedure.isWroughtnautAttacking(target);
 	}
 
-
-	private static boolean isRotChannelingAbility(Entity entity) {
-		if (entity == null || entity.getPersistentData() == null) return false;
-		return getRotPersistentDouble(entity, K_SSCT, 0.0) > 0
-			|| getRotPersistentDouble(entity, K_SSFT, 0.0) > 0
-			|| getRotPersistentDouble(entity, K_SCCT, 0.0) > 0
-			|| getRotPersistentDouble(entity, K_SCFT, 0.0) > 0
-			|| getRotPersistentDouble(entity, K_SWSFT, 0.0) > 0
-			|| getRotPersistentDouble(entity, K_SST, 0.0) > 0
-			|| getRotPersistentDouble(entity, K_SOSCT, 0.0) > 0
-			|| getRotPersistentDouble(entity, K_SSST, 0.0) > 0
-			|| getRotPersistentDouble(entity, K_GRAPPLE_TICKS, 0.0) > 0
-			|| getRotPersistentDouble(entity, K_TK_TICKS, 0.0) > 0
-			|| getRotPersistentBoolean(entity, K_IAR, false)
-			|| getRotPersistentDouble(entity, K_RART, 0.0) > 0
-			|| getRotPersistentDouble(entity, K_STIT, 0.0) > 0
-			|| getRotPersistentBoolean(entity, K_IB, false)
-			|| getRotPersistentDouble(entity, K_SJT, 0.0) > 0
-			|| getRotPersistentDouble(entity, K_SSWST, 0.0) > 0
-			|| getRotPersistentDouble(entity, K_SMT, 0.0) > 0
-			|| getRotPersistentDouble(entity, K_SSP, 0.0) > 0
-			|| getRotPersistentDouble(entity, K_SDKP, 0.0) > 0
-			|| getRotPersistentDouble(entity, K_ROT, 0.0) > 0
-			|| isDoingCombo(entity);
+	public static double getDynamicRangeThreshold(Entity entity, String key, double baseRange, double variance) {
+		return RotBrainProcedure.getDynamicRangeThreshold(entity, key, baseRange, variance);
 	}
 
-	private static void cleanupCombatFlags(Entity entity) {
-		if (entity == null || entity.getPersistentData() == null) return;
-		stopHostileSound(entity.level(), entity.getX(), entity.getY(), entity.getZ(), "the_backwoods:fractus_laser", 256.0);
-		setRotPersistentBoolean(entity, K_IAR, false);
-		setRotPersistentDouble(entity, K_RART, 0);
-		setRotPersistentDouble(entity, "rot_choke_ticks", 0);
-		setRotPersistentBoolean(entity, K_IB, false);
-		setRotPersistentDouble(entity, K_RBAT, 0);
-		setRotPersistentBoolean(entity, K_IBF, false);
-		setRotPersistentDouble(entity, K_GRAPPLE_TICKS, 0);
-		setRotPersistentDouble(entity, K_TK_TICKS, 0);
-		setRotPersistentDouble(entity, K_SSCT, 0);
-		setRotPersistentDouble(entity, K_SSFT, 0);
-		setRotPersistentDouble(entity, K_SCCT, 0);
-		setRotPersistentDouble(entity, K_SCFT, 0);
-		setRotPersistentDouble(entity, K_SWSFT, 0);
-		setRotPersistentDouble(entity, K_SST, 0);
-		setRotPersistentDouble(entity, K_SOSCT, 0);
-		setRotPersistentDouble(entity, K_SSST, 0);
-		setRotPersistentDouble(entity, K_SJT, 0);
-		setRotPersistentDouble(entity, K_SMT, 0);
-		setRotPersistentDouble(entity, K_SMS, 0);
-		setRotPersistentDouble(entity, K_SSWST, 0);
-		setRotPersistentDouble(entity, K_SSP, 0);
-		setRotPersistentDouble(entity, K_SST2, 0);
-		setRotPersistentDouble(entity, K_SDKP, 0);
-		setRotPersistentDouble(entity, K_SDKT, 0);
-		setRotPersistentDouble(entity, K_ROT, 0);
-		setRotPersistentBoolean(entity, K_ROS, false);
-		setRotPersistentDouble(entity, K_SCS2, 0);
-		setRotPersistentDouble(entity, K_SCS, 0);
-		setRotPersistentDouble(entity, K_SCS3, 0);
-		setRotPersistentDouble(entity, K_SCS4, 0);
-		setRotPersistentDouble(entity, K_SCS5, 0);
-		setRotPersistentDouble(entity, K_SCAT, 0);
-		setRotPersistentDouble(entity, K_SMW, 0);
-		setRotPersistentDouble(entity, K_STIT, 0);
-		setRotPersistentBoolean(entity, K_IU, false);
-		setRotPersistentBoolean(entity, K_IUL, false);
-		setRotPersistentBoolean(entity, K_IUR, false);
-		setRotPersistentBoolean(entity, K_IUS, false);
-		setRotPersistentBoolean(entity, K_SUD, false);
-		if (entity instanceof RotEntity rot) {
-			rot.getEntityData().set(RotEntity.DATA_is_armor_ripping, false);
-			rot.getEntityData().set(RotEntity.DATA_is_blocking, false);
-			rot.getEntityData().set(RotEntity.DATA_is_blocking_finish, false);
-			rot.getEntityData().set(RotEntity.DATA_is_sonic_boom, false);
-			rot.getEntityData().set(RotEntity.DATA_is_uppercutting, false);
-			rot.getEntityData().set(RotEntity.DATA_is_uppercut_charging_left, false);
-			rot.getEntityData().set(RotEntity.DATA_is_uppercut_charging_right, false);
-			rot.getEntityData().set(RotEntity.DATA_is_dropkick_charging, false);
+	public static double getEffectiveCombatTicks(Entity entity) {
+		return RotBrainProcedure.getEffectiveCombatTicks(entity);
+	}
 
+	public static double evaluateComboTriggerChance(Entity self, Entity target, RotBrainProcedure.CombatContext ctx) {
+		return RotBrainProcedure.evaluateComboTriggerChance(self, target, ctx);
+	}
+
+	public static class CombatContext extends RotBrainProcedure.CombatContext {}
+
+	public static class AbilityInfo extends RotBrainProcedure.AbilityInfo {
+		public AbilityInfo(String id, String unlockFlag, String cooldownKey, double range, double damage, String... tags) {
+			super(id, unlockFlag, cooldownKey, range, damage, tags);
 		}
 	}
 
-	private static void executeSentinelWitherSkullFiring(LevelAccessor world, Entity entity, Entity target, int fireTicks) {
-		if (!(world instanceof ServerLevel level) || !(entity instanceof LivingEntity living)) return;
-
-		entity.setDeltaMovement(entity.getDeltaMovement().x() * 0.25, entity.getDeltaMovement().y(), entity.getDeltaMovement().z() * 0.25);
-
-		if (target == null || !target.isAlive()) {
-			setRotPersistentDouble(entity, K_SWSFT, 0);
-			setRotPersistentDouble(entity, K_SLCT, LASER_CLOSING_TICKS);
-			return;
+	public static class InterceptionPrediction extends RotBrainProcedure.InterceptionPrediction {
+		public InterceptionPrediction(Vec3 predictedPos, double leadTicks, double interceptProbability, boolean recommendWait, double waitTicks, Vec3 repositionTargetPos) {
+			super(predictedPos, leadTicks, interceptProbability, recommendWait, waitTicks, repositionTargetPos);
 		}
-
-		lockLookAtTarget(entity, target);
-
-		if (fireTicks == 9 && !getRotPersistentBoolean(entity, K_SWSHF, false)) {
-			if (target instanceof LivingEntity livingTarget && isWitherSkullImmuneTarget(level, livingTarget)) {
-				recordWitherSkullFailure(entity, livingTarget);
-				setRotPersistentDouble(entity, K_SWSFT, 0);
-				setRotPersistentDouble(entity, K_SLCT, LASER_CLOSING_TICKS);
-				return;
-			}
-			setRotPersistentBoolean(entity, K_SWSHF, true);
-			Vec3 headPos = living.getEyePosition(1.0F).add(0.0, LASER_Y_OFFSET, 0.0);
-			Vec3 targetPos = target.getEyePosition(1.0F);
-			Vec3 dir = targetPos.subtract(headPos).normalize();
-
-			double spreadX = (level.getRandom().nextDouble() - 0.5) * 0.04;
-			double spreadY = (level.getRandom().nextDouble() - 0.5) * 0.04;
-			double spreadZ = (level.getRandom().nextDouble() - 0.5) * 0.04;
-			Vec3 finalDir = dir.add(spreadX, spreadY, spreadZ).normalize();
-
-			net.minecraft.world.entity.projectile.WitherSkull skull = new net.minecraft.world.entity.projectile.WitherSkull(net.minecraft.world.entity.EntityType.WITHER_SKULL, level);
-			skull.setOwner(living);
-			skull.setPos(headPos.x, headPos.y, headPos.z);
-			skull.setDeltaMovement(finalDir.scale(3.8));
-			if (level.getRandom().nextFloat() < 0.25F) {
-				skull.setDangerous(true);
-			}
-			level.addFreshEntity(skull);
-			if (target instanceof LivingEntity livingTarget) {
-				MobEffectInstance wither = livingTarget.getEffect(MobEffects.WITHER);
-				setRotPersistentString(entity, K_SWSOT2, livingTarget.getUUID().toString());
-				setRotPersistentDouble(entity, K_SWSOB, wither != null ? wither.getDuration() : 0.0);
-				setRotPersistentDouble(entity, K_SWSOT, 30.0);
-			}
-
-			level.sendParticles(net.minecraft.core.particles.ParticleTypes.SWEEP_ATTACK, headPos.x, headPos.y, headPos.z, 1, 0.0, 0.0, 0.0, 0.0);
-			level.sendParticles(net.minecraft.core.particles.ParticleTypes.CRIT, headPos.x + dir.x * 0.5, headPos.y + dir.y * 0.5, headPos.z + dir.z * 0.5, 8, 0.1, 0.1, 0.1, 0.1);
-			level.sendParticles(net.minecraft.core.particles.ParticleTypes.SMOKE, headPos.x, headPos.y, headPos.z, 5, 0.1, 0.1, 0.1, 0.05);
-			playHostileSound(level, headPos.x, headPos.y, headPos.z, "entity.wither.shoot", 1.2F, 1.3F);
-		}
-
-		if (fireTicks <= 1) {
-			setRotPersistentDouble(entity, K_SWSFT, 0);
-			setRotPersistentDouble(entity, K_SLCT, LASER_CLOSING_TICKS);
-		}
-	}
-
-	private static boolean shouldAvoidWitherSkulls(Entity rot, Entity target) {
-		if (!(target instanceof LivingEntity livingTarget)) return false;
-		String learnedTarget = rot.getPersistentData().getString(K_SWSIT);
-		return livingTarget.getUUID().toString().equals(learnedTarget);
-	}
-
-	private static boolean isWitherSkullImmuneTarget(ServerLevel level, LivingEntity target) {
-		return isWither(target) || target.isInvulnerableTo(level.damageSources().wither());
-	}
-
-	private static void recordWitherSkullFailure(Entity rot, LivingEntity target) {
-		String targetId = target.getUUID().toString();
-		String previousTarget = rot.getPersistentData().getString(K_SWSFT2);
-		double failures = previousTarget.equals(targetId) ? rot.getPersistentData().getDouble(K_SWSF) : 0.0;
-		failures++;
-		rot.getPersistentData().putString(K_SWSFT2, targetId);
-		rot.getPersistentData().putDouble(K_SWSF, failures);
-		if (failures >= 2.0) rot.getPersistentData().putString(K_SWSIT, targetId);
-	}
-
-	private static void interceptEnderPearls(LevelAccessor world, Entity entity) {
-		if (!(world instanceof ServerLevel level)) return;
-		boolean unlockedSolar = getRotPersistentBoolean(entity, K_USB, false);
-		boolean unlockedCryo = getRotPersistentBoolean(entity, K_UCB, false);
-		if (!unlockedSolar && !unlockedCryo) return;
-
-		if (getRotPersistentDouble(entity, K_SSCT, 0.0) > 0
-			|| getRotPersistentDouble(entity, K_SSFT, 0.0) > 0
-			|| getRotPersistentDouble(entity, K_SCCT, 0.0) > 0
-			|| getRotPersistentDouble(entity, K_SCFT, 0.0) > 0) {
-			return;
-		}
-
-		AABB box = entity.getBoundingBox().inflate(64.0);
-		java.util.List<net.minecraft.world.entity.projectile.ThrownEnderpearl> pearls = level.getEntitiesOfClass(net.minecraft.world.entity.projectile.ThrownEnderpearl.class, box);
-		for (net.minecraft.world.entity.projectile.ThrownEnderpearl pearl : pearls) {
-			if (pearl.isAlive() && pearl.tickCount >= 3) {
-				double dist = entity.distanceTo(pearl);
-				boolean approachingLand = pearl.getDeltaMovement().y() < 0 || pearl.tickCount >= 8 || dist < 30.0;
-				if (approachingLand) {
-					lockLookAtTarget(entity, pearl);
-					entity.getPersistentData().putInt(K_SLTI, pearl.getId());
-					if (unlockedSolar) {
-						setRotPersistentDouble(entity, K_SSFT, 15.0);
-					} else {
-						setRotPersistentDouble(entity, K_SCFT, 15.0);
-					}
-					break;
-				}
-			}
-		}
-	}
-
-	private static Set<Integer> getActiveBiasIndices(Entity entity) {
-		Set<Integer> set = new HashSet<>();
-		String str = getRotPersistentString(entity, K_AABI, "");
-		if (!str.isEmpty()) {
-			for (String part : str.split(",")) {
-				try {
-					set.add(Integer.parseInt(part.trim()));
-				} catch (Exception ignored) {}
-			}
-		}
-		return set;
-	}
-
-	private static void setActiveBiasIndices(Entity entity, Set<Integer> set) {
-		if (set == null || set.isEmpty()) {
-			entity.getPersistentData().remove(K_AABI);
-		} else {
-			StringBuilder sb = new StringBuilder();
-			for (int idx : set) {
-				if (sb.length() > 0) sb.append(",");
-				sb.append(idx);
-			}
-			setRotPersistentString(entity, K_AABI, sb.toString());
-		}
-	}
-
-	private static void recordBiasIndexUpdate(Entity entity, String lastMove) {
-		if (lastMove != null && lastMove.startsWith("combo_")) {
-			try {
-				int idx = Integer.parseInt(lastMove.substring(6));
-				Set<Integer> set = getActiveBiasIndices(entity);
-				if (set.add(idx)) {
-					setActiveBiasIndices(entity, set);
-				}
-			} catch (Exception ignored) {}
-		}
-	}
-
-	public static String inferCurrentAttackType(Entity rot) {
-		if (rot == null) return "MELEE";
-		if (getRotPersistentDouble(rot, K_SJT, 0.0) > 0) return "JUDGMENT";
-		if (getRotPersistentDouble(rot, K_ROT, 0.0) > 0) return "OVERHEAD";
-		if (getRotPersistentDouble(rot, K_SDKT, 0.0) > 0 || getRotPersistentDouble(rot, K_SDKP, 0.0) > 0) return "DIE_KICK";
-		if (getRotPersistentDouble(rot, K_SWSFT, 0.0) > 0) return "WITHER_SKULL";
-		if (getRotPersistentDouble(rot, K_SST, 0.0) > 0 || getRotPersistentDouble(rot, K_SOSCT, 0.0) > 0 || getRotPersistentDouble(rot, K_SSST, 0.0) > 0) return "SONIC";
-		if (getRotPersistentDouble(rot, K_SST2, 0.0) > 0 || getRotPersistentDouble(rot, K_SSWST, 0.0) > 0) return "SLAM";
-		if (getRotPersistentDouble(rot, K_SSFT, 0.0) > 0 || getRotPersistentDouble(rot, K_SSCT, 0.0) > 0) return "SOLAR_BEAM";
-		if (getRotPersistentDouble(rot, K_SCFT, 0.0) > 0 || getRotPersistentDouble(rot, K_SCCT, 0.0) > 0) return "CRYO_BEAM";
-		if (getRotPersistentDouble(rot, K_GRAPPLE_TICKS, 0.0) > 0) return "GRAPPLE";
-		if (getRotPersistentDouble(rot, K_TK_TICKS, 0.0) > 0) return "TELEKINESIS";
-		if (getRotPersistentDouble(rot, K_SMW, 0.0) > 0) return "MELEE_COUNTER";
-		return "MELEE";
-	}
-
-	public static boolean isTargetHighlyDangerous(LivingEntity target) {
-		if (target == null) return false;
-		String typeKey = BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()).toString().toLowerCase();
-		if (typeKey.contains("wroughtnaut") || typeKey.contains("boss") || typeKey.contains("warden") || typeKey.contains("dragon") || typeKey.contains("wither")) {
-			return true;
-		}
-		ItemStack mainHand = target.getMainHandItem();
-		if (!mainHand.isEmpty()) {
-			String itemName = BuiltInRegistries.ITEM.getKey(mainHand.getItem()).getPath().toLowerCase();
-			if (itemName.contains("wrought") || itemName.contains("giant") || itemName.contains("hammer") || itemName.contains("battleaxe") || itemName.contains("claymore") || itemName.contains("heavy")) {
-				return true;
-			}
-		}
-		if (target.getAttribute(Attributes.ATTACK_DAMAGE) != null) {
-			double attackDmg = target.getAttributeValue(Attributes.ATTACK_DAMAGE);
-			if (attackDmg >= 8.5) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	private static boolean getRotPersistentBoolean(Entity entity, String key, boolean fallback) {
-		return entity.getPersistentData().contains(key) ? entity.getPersistentData().getBoolean(key) : fallback;
-	}
-
-	private static int getRotPersistentInt(Entity entity, String key, int fallback) {
-		return entity.getPersistentData().contains(key) ? entity.getPersistentData().getInt(key) : fallback;
-	}
-
-	private static double getRotPersistentDouble(Entity entity, String key, double fallback) {
-		return entity.getPersistentData().contains(key) ? entity.getPersistentData().getDouble(key) : fallback;
-	}
-
-	public static double getTelegraphJitter(Entity entity, String key, double baseTick, double minOffset, double maxOffset) {
-		if (entity == null) return baseTick;
-		long uuidBits = entity.getUUID().getLeastSignificantBits();
-		double castCount = getRotPersistentDouble(entity, key + "_cast_instance", 0.0);
-		double h = Math.abs((uuidBits ^ Double.doubleToRawLongBits(castCount)) % 1000) / 1000.0;
-		double offset = minOffset + h * (maxOffset - minOffset);
-		return Math.round(baseTick + offset);
-	}
-
-	private static String getRotPersistentString(Entity entity, String key, String fallback) {
-		return entity.getPersistentData().contains(key) ? entity.getPersistentData().getString(key) : fallback;
-	}
-
-	private static void setRotPersistentBoolean(Entity entity, String key, boolean val) {
-		entity.getPersistentData().putBoolean(key, val);
-	}
-
-	private static void setRotPersistentInt(Entity entity, String key, int val) {
-		entity.getPersistentData().putInt(key, val);
-	}
-
-	private static void setRotPersistentDouble(Entity entity, String key, double val) {
-		entity.getPersistentData().putDouble(key, val);
-	}
-
-	private static void setRotPersistentString(Entity entity, String key, String val) {
-		entity.getPersistentData().putString(key, val);
-	}
-
-	private static boolean hasNBTKey(CompoundTag tag, String key) {
-		return tag.contains(key);
 	}
 }
-// 1.21.1. never delete version comments
+// 1.21.1
