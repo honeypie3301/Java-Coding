@@ -8902,11 +8902,7 @@ public static float lerpAngle(float pct, float start, float end) {
 		}
 	}
 
-	public static class InterceptionPrediction extends RotBrainProcedure.InterceptionPrediction {
-		public InterceptionPrediction(Vec3 predictedPos, double leadTicks, double interceptProbability, boolean recommendWait, double waitTicks, Vec3 repositionTargetPos) {
-			super(predictedPos, leadTicks, interceptProbability, recommendWait, waitTicks, repositionTargetPos);
-		}
-	}
+	public static class UniversalCombatPredictionEngine extends RotBrainProcedure.UniversalCombatPredictionEngine {}
 
 	@SuppressWarnings({"rawtypes", "unchecked"})
 	public static java.util.List<RotOnEntityTickUpdateProcedure.AbilityInfo> getAvailableAbilities(Entity entity) {
@@ -8922,6 +8918,10 @@ public static float lerpAngle(float pct, float start, float end) {
 		res.isBlocking = ctx.isBlocking;
 		res.isCornered = ctx.isCornered;
 		return res;
+	}
+
+	public static double scoreAbility(RotBrainProcedure.AbilityInfo ability, RotBrainProcedure.CombatContext ctx, Entity self, Entity target) {
+		return RotBrainProcedure.scoreAbility(ability, ctx, self, target);
 	}
 }
 // 1.21.1
